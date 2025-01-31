@@ -1,8 +1,11 @@
 {
-  "name": "@humansignal/editor",
+  "name": "@pareto-engineering/editor",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "version": "0.0.0",
   "license": "MIT",
-  "private": true,
   "dependencies": {
     "@ant-design/colors": "6.0.0",
     "@ant-design/icons": "4.8.1",
