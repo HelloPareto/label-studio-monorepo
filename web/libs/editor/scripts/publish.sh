@@ -10,7 +10,7 @@ fi
 TOKEN=$1
 VERSION=$2
 COMPANY="pareto-engineering"
-REPO="label-studio"
+REPO="label-studio-mono"
 
 # Colors for colored output
 GREEN='\033[0;32m'
