@@ -40,7 +40,6 @@
       "post-checkout": "npx -y copy-files-from-to"
     }
   },
-  "private": true,
   "dependencies": {
     "@martel/audio-file-decoder": "^2.3.15",
     "@radix-ui/react-select": "^2.1.4",
