@@ -33,7 +33,7 @@
     "test:watch": "yarn test:unit --all --watch",
     "test:watch:affected": "yarn test --watch",
     "postinstall": "npx -y copy-files-from-to",
-    "publish": "sh libs/scripts/editor/publish.sh $(grep TOKEN .env | cut -d '=' -f 2)"
+    "publish": "sh libs/editor/scripts/publish.sh $(grep TOKEN .env | cut -d '=' -f 2)"
   },
   "husky": {
     "hooks": {
