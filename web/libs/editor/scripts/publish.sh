@@ -2,13 +2,14 @@
 
 # TODO all steps will be executed even if some steps will fail
 
-if [ -z $1 ]; then
+if [ -z $2 ]; then
   echo "Provide a new version as a first argument"
   exit 1
 fi
 
-VERSION=$1
-COMPANY="heartexlabs"
+TOKEN=$1
+VERSION=$2
+COMPANY="pareto-engineering"
 REPO="label-studio"
 
 # Colors for colored output
@@ -26,8 +27,8 @@ rm build/.gitignore
 # Replace links to published files in README to the actual one
 # `ls -tU` sorts files by creation date (recent is first)
 # `head -1` gets the first one (the recent)
-sed -E -e "s/main\..*js/$(cd build/static/js && ls -tU *.js | head -1)/"\
-       -e "s/main\..*css/$(cd build/static/css && ls -tU *.css | head -1)/"\
+sed -E -e "s/LabelStudio\..*js/$(cd build/static/js && ls -tU *.js | head -1)/"\
+       -e "s/LabelStudio\..*css/$(cd build/static/css && ls -tU *.css | head -1)/"\
        -e "s/[0-9]\.[0-9]+\.[0-9]+/$VERSION/"\
        -i '' README.md
 git add README.md
@@ -51,7 +52,7 @@ echo && echo -e "${GREEN}### Release commit and tag pushed to github${NC}" && ec
 sed -E -e "s/^ *\"prepublishOnly\".*$//" -i '' package.json
 
 # Authenticate within npmjs.com using Access Token from NPMJS_TOKEN
-echo "//registry.npmjs.org/:_authToken=${NPMJS_TOKEN}" > ".npmrc"
+echo "//registry.npmjs.org/:_authToken=${TOKEN}"
 
 # Publish the package
 npm publish
@@ -60,12 +61,6 @@ echo && echo -e "${GREEN}### NPM package published${NC}" && echo
 
 # GitHub Packages requires scoped @company/repo name
 sed -E -e "s/^  \"name\".*$/  \"name\": \"@$COMPANY\/$REPO\",/" -i '' package.json
-
-# Authenticate within Github Packages using Personal Access Token
-echo "//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}" > ".npmrc"
-
-# Publish the package
-npm publish --registry=https://npm.pkg.github.com/
 
 echo && echo -e "${GREEN}### GitHub package published${NC}" && echo
 

@@ -32,7 +32,8 @@
     "test:affected": "nx affected --target=test:unit --base=develop",
     "test:watch": "yarn test:unit --all --watch",
     "test:watch:affected": "yarn test --watch",
-    "postinstall": "npx -y copy-files-from-to"
+    "postinstall": "npx -y copy-files-from-to",
+    "publish": "sh scripts/publish.sh $(grep TOKEN .env | cut -d '=' -f 2)"
   },
   "husky": {
     "hooks": {
@@ -47,7 +48,7 @@
     "@radix-ui/react-toast": "^1.1.5",
     "@tanstack/react-query": "4",
     "@thi.ng/rle-pack": "^3.1.30",
-    "antd": "^4.3.3",
+    "antd": "^5.14.2",
     "chroma-js": "^2.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
