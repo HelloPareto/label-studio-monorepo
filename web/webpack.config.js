@@ -86,7 +86,7 @@ module.exports = composePlugins(
     // LS entrypoint
     if (process.env.MODE !== "standalone") {
       config.entry = {
-        main: {
+        LabelStudio: {
           import: path.resolve(__dirname, "apps/labelstudio/src/main.tsx"),
         },
       };
