@@ -1,6 +1,0 @@
-{
-  "message": "fix: LEAP-1892: [FE] Deeply nested Choices are visible when their parents are hidden (#7180)",
-  "commit": "52e941a0860ea8211eaa77bef0e10628db3e1b69",
-  "date": "2025-03-14T12:07:16.000Z",
-  "branch": "develop"
-}
