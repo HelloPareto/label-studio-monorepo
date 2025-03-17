@@ -1,14 +1,17 @@
 {
-  "name": "@humansignal/editor",
-  "version": "0.0.0",
+  "name": "@pareto-engineering/editor",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "version": "1.0.7",
   "license": "MIT",
-  "private": true,
   "dependencies": {
     "@ant-design/colors": "6.0.0",
     "@ant-design/icons": "4.8.1",
     "@martel/audio-file-decoder": "^2.3.15",
     "@thi.ng/rle-pack": "^3.1.30",
-    "antd": "^4.3.3",
+    "antd": "^5.14.2",
     "chroma-js": "^2.1.1",
     "d3": "^5.16.0",
     "date-fns": "^2.20.1",
