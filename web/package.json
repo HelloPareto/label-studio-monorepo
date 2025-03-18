@@ -4,7 +4,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "version": "1.0.15",
+  "version": "1.0.16",
   "license": "MIT",
   "scripts": {
     "ui:serve": "nx storybook storybook",
