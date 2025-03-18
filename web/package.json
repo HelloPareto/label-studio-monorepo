@@ -37,7 +37,8 @@
     "test:watch": "yarn test:unit --all --watch",
     "test:watch:affected": "yarn test --watch",
     "postinstall": "node scripts/copy-wasm-files.js",
-    "publish": "sh libs/editor/scripts/publish.sh $(grep TOKEN .env | cut -d '=' -f 2) $npm_config_version"
+    "publish": "sh libs/editor/scripts/publish.sh $(grep TOKEN .env | cut -d '=' -f 2) $npm_config_version",
+    "build:editor": "node libs/editor/scripts/build-module.js"
   },
   "dependencies": {
     "@martel/audio-file-decoder": "^2.3.15",
