@@ -4,7 +4,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "version": "1.0.10",
+  "version": "1.0.11",
   "license": "MIT",
   "scripts": {
     "ui:serve": "nx storybook storybook",
@@ -41,6 +41,7 @@
     "build:editor": "node libs/editor/scripts/build-module.js"
   },
   "dependencies": {
+    "@ant-design/colors": "^6.0.0",
     "@martel/audio-file-decoder": "^2.3.15",
     "@radix-ui/react-select": "^2.1.4",
     "@radix-ui/react-slot": "^1.1.1",
