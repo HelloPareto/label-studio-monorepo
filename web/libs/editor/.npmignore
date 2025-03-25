@@ -1,0 +1,26 @@
+# Source files
+src/
+tests/
+examples/
+public/
+scripts/
+
+# Nx build outputs that should not be in the package
+coverage/
+node_modules/
+
+# Config files
+.babelrc
+.editorconfig
+.eslintrc
+.gitignore
+.prettierrc
+.travis.yml
+jest.config.js
+tsconfig*.json
+webpack.config.js
+cypress.config.ts
+
+# Don't ignore the dist directory - this is crucial!
+!dist/
+!dist/**/* 

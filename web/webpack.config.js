@@ -1,29 +1,23 @@
-// const path = require('path');
 const path = require("path");
 const { composePlugins, withNx } = require("@nx/webpack");
 const { withReact } = require("@nx/react");
 const { merge } = require("webpack-merge");
 
 require("dotenv").config({
-  // resolve the .env file in the root of the project ../
   path: path.resolve(__dirname, "../.env"),
 });
 
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const { EnvironmentPlugin, DefinePlugin, ProgressPlugin, optimize } = require("webpack");
+const { EnvironmentPlugin, DefinePlugin } = require("webpack");
 const TerserPlugin = require("terser-webpack-plugin");
 const CssMinimizerPlugin = require("css-minimizer-webpack-plugin");
 
 const RELEASE = require("./release").getReleaseName();
 
 const css_prefix = "lsf-";
-const mode = process.env.BUILD_MODULE ? "production" : process.env.NODE_ENV || "development";
+const mode = process.env.NODE_ENV || "development";
 const isDevelopment = mode !== "production";
-const devtool = process.env.NODE_ENV === "production" ? "source-map" : "cheap-module-source-map";
-const FRONTEND_HMR = process.env.FRONTEND_HMR === "true";
-const FRONTEND_HOSTNAME = FRONTEND_HMR ? process.env.FRONTEND_HOSTNAME || "http://localhost:8010" : "";
-const DJANGO_HOSTNAME = process.env.DJANGO_HOSTNAME || "http://localhost:8080";
-const HMR_PORT = FRONTEND_HMR ? +new URL(FRONTEND_HOSTNAME).port : 8010;
+const devtool = isDevelopment ? "source-map" : "source-map";
 
 const LOCAL_ENV = {
   NODE_ENV: mode,
@@ -36,7 +30,9 @@ const BUILD = {
 };
 
 const plugins = [
-  new MiniCssExtractPlugin(),
+  new MiniCssExtractPlugin({
+    filename: "css/[name].css",
+  }),
   new DefinePlugin({
     "process.env.CSS_PREFIX": JSON.stringify(css_prefix),
   }),
@@ -45,14 +41,18 @@ const plugins = [
 
 const optimizer = () => {
   const result = {
-    minimize: true,
+    minimize: !BUILD.NO_MINIMIZE,
     minimizer: [],
   };
 
-  if (mode === "production") {
+  if (mode === "production" && !BUILD.NO_MINIMIZE) {
     result.minimizer.push(
       new TerserPlugin({
         parallel: true,
+        terserOptions: {
+          keep_classnames: true,
+          keep_fnames: true,
+        },
       }),
       new CssMinimizerPlugin({
         parallel: true,
@@ -60,20 +60,19 @@ const optimizer = () => {
     );
   }
 
-  if (BUILD.NO_MINIMIZE) {
-    result.minimize = false;
-    result.minimizer = undefined;
-  }
-
-  if (process.env.MODE === "standalone") {
-    result.runtimeChunk = false;
-    result.splitChunks = { cacheGroups: { default: false } };
-  }
-
   return result;
 };
 
-// Nx plugins for webpack.
+// Define entry point and externals
+const PEER_DEPENDENCIES = [
+  "react", 
+  "react-dom",
+  "mobx",
+  "mobx-react",
+  "mobx-state-tree"
+];
+
+// Nx plugins for webpack
 module.exports = composePlugins(
   withNx({
     nx: {
@@ -83,47 +82,34 @@ module.exports = composePlugins(
   }),
   withReact({ svgr: true }),
   (config) => {
-    // LS entrypoint
-    if (process.env.MODE !== "standalone") {
-      config.entry = {
-        main: {
-          import: path.resolve(__dirname, "apps/labelstudio/src/main.tsx"),
-        },
-      };
+    // Library entrypoint - update this to match your main export file
+    config.entry = {
+      index: path.resolve(__dirname, "libs/index.ts"), // Create this file to export your components
+    };
 
-      config.output = {
-        ...config.output,
-        uniqueName: "labelstudio",
-        publicPath: isDevelopment && FRONTEND_HOSTNAME ? `${FRONTEND_HOSTNAME}/react-app/` : "auto",
-        scriptType: "text/javascript",
-      };
+    // Configure as a library
+    config.output = {
+      path: path.resolve(__dirname, "dist"),
+      filename: "[name].js",
+      library: {
+        name: "labelstudio",
+        type: "umd",
+        umdNamedDefine: true,
+      },
+      globalObject: 'this',
+      publicPath: "",
+    };
 
-      config.optimization = {
-        runtimeChunk: "single",
-        sideEffects: true,
-        splitChunks: {
-          cacheGroups: {
-            commonVendor: {
-              test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|mobx|mobx-react|mobx-react-lite|mobx-state-tree)[\\/]/,
-              name: "vendor",
-              chunks: "all",
-            },
-            defaultVendors: {
-              test: /[\\/]node_modules[\\/]/,
-              priority: -10,
-              reuseExistingChunk: true,
-              chunks: "async",
-            },
-            default: {
-              minChunks: 2,
-              priority: -20,
-              reuseExistingChunk: true,
-              chunks: "async",
-            },
-          },
-        },
+    // Define peer dependencies as externals
+    config.externals = PEER_DEPENDENCIES.reduce((externals, dep) => {
+      externals[dep] = {
+        commonjs: dep,
+        commonjs2: dep,
+        amd: dep,
+        root: dep,
       };
-    }
+      return externals;
+    }, {});
 
     config.resolve.fallback = {
       fs: false,
@@ -138,6 +124,7 @@ module.exports = composePlugins(
       asyncWebAssembly: true,
     };
 
+    // Handle SCSS modules the same way as original config
     config.module.rules.forEach((rule) => {
       const testString = rule.test.toString();
       const isScss = testString.includes("scss");
@@ -162,16 +149,9 @@ module.exports = composePlugins(
 
       if (rule.test.toString().match(/scss|sass/) && !isCssModule) {
         const r = rule.oneOf.filter((r) => {
-          // we don't need rules that don't have loaders
           if (!r.use) return false;
-
           const testString = r.test.toString();
-
-          // we also don't need css modules as these are used directly
-          // in the code and don't need prefixing
           if (testString.match(/module|raw/)) return false;
-
-          // we only target pre-processors that has 'css-loader included'
           return testString.match(/scss|sass/) && r.use.some((u) => u.loader && u.loader.includes("css-loader"));
         });
 
@@ -180,13 +160,13 @@ module.exports = composePlugins(
 
           if (!cssLoader) return;
 
-          const isSASS = _r.use.some((use) => use.loader && use.loader.match(/sass|scss/));
+          const isSASS = _r.use.some((use) => use.loader && use.loader.includes(/sass|scss/));
 
           if (isSASS) _r.exclude = /node_modules/;
 
           if (cssLoader.options) {
             cssLoader.options.modules = {
-              localIdentName: `${css_prefix}[local]`, // Customize this format
+              localIdentName: `${css_prefix}[local]`,
               getLocalIdent(_ctx, _ident, className) {
                 if (className.includes("ant")) return className;
               },
@@ -200,6 +180,7 @@ module.exports = composePlugins(
       }
     });
 
+    // Keep SVG and other loaders
     config.module.rules.push(
       {
         test: /\.svg$/,
@@ -232,7 +213,7 @@ module.exports = composePlugins(
         test: /tailwind\.css/,
         exclude: /node_modules/,
         use: [
-          "style-loader",
+          MiniCssExtractPlugin.loader,
           {
             loader: "css-loader",
             options: {
@@ -252,7 +233,6 @@ module.exports = composePlugins(
     }
 
     config.resolve.alias = {
-      // Common dependencies across at least two sub-packages
       react: path.resolve(__dirname, "node_modules/react"),
       "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
       "react-joyride": path.resolve(__dirname, "node_modules/react-joyride"),
@@ -265,38 +245,6 @@ module.exports = composePlugins(
       mode,
       plugins,
       optimization: optimizer(),
-      devServer:
-        process.env.MODE === "standalone"
-          ? {}
-          : {
-              // Port for the Webpack dev server
-              port: HMR_PORT,
-              // Enable HMR
-              hot: true,
-              // Allow cross-origin requests from Django
-              headers: { "Access-Control-Allow-Origin": "*" },
-              static: {
-                directory: path.resolve(__dirname, "../label_studio/core/static/"),
-                publicPath: "/static/",
-              },
-              devMiddleware: {
-                publicPath: `${FRONTEND_HOSTNAME}/react-app/`,
-              },
-              allowedHosts: "all", // Allow access from Django's server
-              proxy: {
-                "/api": {
-                  target: `${DJANGO_HOSTNAME}/api`,
-                  changeOrigin: true,
-                  pathRewrite: { "^/api": "" },
-                  secure: false,
-                },
-                "/": {
-                  target: `${DJANGO_HOSTNAME}`,
-                  changeOrigin: true,
-                  secure: false,
-                },
-              },
-            },
     });
   },
 );

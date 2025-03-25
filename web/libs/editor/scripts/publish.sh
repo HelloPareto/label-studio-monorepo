@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# TODO all steps will be executed even if some steps will fail
+# This script handles the publishing process for the @pareto-engineering/editor package
 
-if [ -z $2 ]; then
+if [ -z $1 ]; then
   echo "Provide a new version as a first argument"
   exit 1
 fi
@@ -14,33 +14,21 @@ REPO="label-studio-mono"
 
 # Colors for colored output
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Just to be sure
 git pull
 
-# Create new build
-rm -rf build
-yarn build:module
-rm build/.gitignore
-
-# Replace links to published files in README to the actual one
-# `ls -tU` sorts files by creation date (recent is first)
-# `head -1` gets the first one (the recent)
-sed -E -e "s/main\..*js/$(cd build/static/js && ls -tU *.js | head -1)/"\
-       -e "s/main\..*css/$(cd build/static/css && ls -tU *.css | head -1)/"\
-       -e "s/[0-9]\.[0-9]+\.[0-9]+/$VERSION/"\
-       -i '' README.md
-git add README.md
-
 # Patch version
-sed -E -e "s/^  \"version\".*$/  \"version\": \"$VERSION\",/" -i '' package.json package-lock.json
-git add package.json package-lock.json
+sed -E -e "s/^  \"version\".*$/  \"version\": \"$VERSION\",/" -i '' package.json
+git add package.json
 
-echo && echo -e "${GREEN}### README and package.json modified successfully${NC}" && echo
+echo && echo -e "${GREEN}### Package.json updated successfully${NC}" && echo
 
 # Create release commit and tag and push them
-git commit -m "$VERSION"
+git commit -m "Release editor v$VERSION"
 git tag v$VERSION
 
 git push
@@ -48,30 +36,50 @@ git push origin v$VERSION
 
 echo && echo -e "${GREEN}### Release commit and tag pushed to github${NC}" && echo
 
-# Remove prepublish step because we are using custom script
-sed -E -e "s/^ *\"prepublishOnly\".*$//" -i '' package.json
+# Build the package
+npm run build:editor
+
+# Check if dist directory exists and is not empty
+if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then
+  echo -e "${RED}### Error: dist directory is missing or empty${NC}"
+  echo "Building package again to ensure dist is created..."
+  
+  # Force rebuild
+  node scripts/build-module.js
+  
+  # Check again
+  if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then
+    echo -e "${RED}### Error: Failed to create dist directory. Aborting publish.${NC}"
+    exit 1
+  fi
+fi
+
+echo -e "${GREEN}### dist directory exists and contains files:${NC}"
+ls -la dist
+
+# Verify package integrity
+echo -e "${YELLOW}### Verifying package integrity...${NC}"
+node scripts/verify-package.js
+if [ $? -ne 0 ]; then
+  echo -e "${RED}### Package verification failed. Aborting publish.${NC}"
+  exit 1
+fi
 
 # Authenticate within npmjs.com using Access Token from NPMJS_TOKEN
 echo "//registry.npmjs.org/:_authToken=${TOKEN}" > ".npmrc"
 
+# Create a dry-run tarball to verify content
+echo -e "${YELLOW}### Verifying package contents before publishing...${NC}"
+npm pack --dry-run
+
 # Publish the package
+echo -e "${YELLOW}### Publishing package...${NC}"
 npm publish
 
 echo && echo -e "${GREEN}### NPM package published${NC}" && echo
 
-# GitHub Packages requires scoped @company/repo name
-sed -E -e "s/^  \"name\".*$/  \"name\": \"@$COMPANY\/$REPO\",/" -i '' package.json
+# Clean up
+git checkout -- package.json
+rm -rf .npmrc
 
-# # Authenticate within Github Packages using Personal Access Token
-# echo "//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}" > ".npmrc"
-
-# # Publish the package
-# npm publish --registry=https://npm.pkg.github.com/
-
-echo && echo -e "${GREEN}### GitHub package published${NC}" && echo
-
-# Restore modified files
-git checkout -- package.json package-lock.json
-
-# clean up
-rm -rf build
+echo && echo -e "${GREEN}### Cleanup completed${NC}" && echo
