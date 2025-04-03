@@ -83,6 +83,38 @@ module.exports = composePlugins(
   }),
   withReact({ svgr: true }),
   (config) => {
+
+    // Configure for npm package when building editor in production
+    if (process.env.NX_TASK_TARGET_PROJECT === 'editor' && process.env.NODE_ENV === 'production') {
+      // Set library output configuration
+      config.output = {
+        ...config.output,
+        library: {
+          type: 'umd',
+          name: 'LabelStudioEditor',
+          umdNamedDefine: true,
+        },
+        globalObject: 'this',
+        filename: 'index.js',
+      };
+      
+      // Ensure externals for peer dependencies
+      config.externals = {
+        react: {
+          commonjs: 'react',
+          commonjs2: 'react',
+          amd: 'react',
+          root: 'React',
+        },
+        'react-dom': {
+          commonjs: 'react-dom',
+          commonjs2: 'react-dom',
+          amd: 'react-dom',
+          root: 'ReactDOM',
+        },
+      };
+    }
+
     // LS entrypoint
     if (process.env.MODE !== "standalone") {
       config.entry = {
