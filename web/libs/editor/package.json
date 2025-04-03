@@ -1,6 +1,6 @@
 {
   "name": "@pareto-engineering/label-studio-editor",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "main": "index.js",
   "types": "index.d.ts",
   "files": ["*"],
@@ -21,7 +21,7 @@
     "@ant-design/icons": "4.8.1",
     "@martel/audio-file-decoder": "^2.3.15",
     "@thi.ng/rle-pack": "^3.1.30",
-    "antd": "^4.3.3",
+    "antd": "^5.14.2",
     "chroma-js": "^2.1.1",
     "d3": "^5.16.0",
     "date-fns": "^2.20.1",
