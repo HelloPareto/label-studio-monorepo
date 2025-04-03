@@ -1,5 +1,7 @@
 import { Destructable } from "../Common/Destructable";
 import { ComputeWorker } from "../Common/Worker";
+// Import the worker directly to prevent webpack chunking issues
+import SplitChannelWorkerCode from "./SplitChannelWorker.js";
 
 export class SplitChannel extends Destructable {
   static usage = 0;
@@ -10,9 +12,10 @@ export class SplitChannel extends Destructable {
     super();
     SplitChannel.usage++;
     if (!SplitChannel.worker) {
-      // eslint-disable-next-line
-      // @ts-ignore
-      SplitChannel.worker = new ComputeWorker(new Worker(new URL("./SplitChannelWorker.ts", import.meta.url)));
+      // Create a blob URL from the worker code instead of using dynamic import
+      const blob = new Blob([SplitChannelWorkerCode], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      SplitChannel.worker = new ComputeWorker(new Worker(url));
     }
     this.channelCount = channelCount;
   }

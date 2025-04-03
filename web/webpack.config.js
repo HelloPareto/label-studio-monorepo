@@ -65,7 +65,8 @@ const optimizer = () => {
     result.minimizer = undefined;
   }
 
-  if (process.env.MODE === "standalone") {
+  // These settings are now applied in both standalone mode and for editor builds
+  if (process.env.MODE === "standalone" || (process.env.NX_TASK_TARGET_PROJECT === 'editor' && process.env.NODE_ENV === 'production')) {
     result.runtimeChunk = false;
     result.splitChunks = { cacheGroups: { default: false } };
   }
@@ -96,6 +97,10 @@ module.exports = composePlugins(
         },
         globalObject: 'this',
         filename: 'index.js',
+        // Ensure no chunking for library builds - all code in single file
+        chunkFilename: 'index.js',
+        // Prevent dynamic chunks with content hash
+        assetModuleFilename: '[name][ext]',
       };
       
       // Ensure externals for peer dependencies
@@ -113,6 +118,139 @@ module.exports = composePlugins(
           root: 'ReactDOM',
         },
       };
+      
+      // Completely disable code splitting for library builds
+      config.optimization = {
+        minimize: mode === 'production',
+        runtimeChunk: false,
+        splitChunks: false,
+        moduleIds: 'named',
+        chunkIds: 'named'
+      };
+
+      // Force single entry point for library build
+      config.entry = {
+        index: config.entry.main
+      };
+
+      // Create a custom rule to inline all workers and prevent chunking
+      const customWorkerRule = {
+        test: /worker.*\.(js|ts)$/i,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: 'babel-loader',
+            options: {
+              presets: [
+                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
+                ['@babel/preset-typescript', { isTSX: true, allExtensions: true }]
+              ],
+              plugins: [
+                '@babel/plugin-transform-runtime',
+                'babel-plugin-dynamic-import-node'
+              ]
+            }
+          }
+        ]
+      };
+
+      // Add at the beginning of rules array to ensure it's processed first
+      config.module.rules.unshift(customWorkerRule);
+      
+      // Also specifically handle the SplitChannelWorker case
+      config.module.rules.unshift({
+        test: /SplitChannelWorker\.ts$/,
+        include: [path.resolve(__dirname, "libs/editor/src/lib/AudioUltra/Media")],
+        use: [
+          {
+            loader: 'babel-loader',
+            options: {
+              presets: [
+                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
+                ['@babel/preset-typescript', { isTSX: true, allExtensions: true }]
+              ],
+              plugins: [
+                '@babel/plugin-transform-runtime',
+                'babel-plugin-dynamic-import-node'
+              ]
+            }
+          }
+        ]
+      });
+      
+      // Fix for dynamic imports of web workers in webpack
+      config.plugins.push(
+        new DefinePlugin({
+          'import.meta.url': 'globalThis.location.href',
+        })
+      );
+      
+      // Find or add babel-loader
+      let babelLoaderFound = false;
+      
+      config.module.rules.forEach(rule => {
+        if (rule.test && (rule.test.toString().includes('tsx') || rule.test.toString().includes('jsx'))) {
+          if (Array.isArray(rule.use)) {
+            rule.use.forEach(loader => {
+              if (typeof loader === 'object' && loader.loader && loader.loader.includes('babel-loader')) {
+                babelLoaderFound = true;
+                if (!loader.options) loader.options = {};
+                if (!loader.options.presets) loader.options.presets = [];
+                
+                // Ensure TypeScript support
+                const tsPreset = '@babel/preset-typescript';
+                if (!loader.options.presets.includes(tsPreset)) {
+                  loader.options.presets.push([tsPreset, { 
+                    isTSX: true,
+                    allExtensions: true
+                  }]);
+                }
+                
+                if (!loader.options.plugins) loader.options.plugins = [];
+                
+                // Add plugins to transform imports rather than split them
+                const pluginsToAdd = [
+                  '@babel/plugin-transform-runtime',
+                  '@babel/plugin-syntax-dynamic-import',
+                  'babel-plugin-dynamic-import-node'
+                ];
+                
+                pluginsToAdd.forEach(plugin => {
+                  if (!loader.options.plugins.includes(plugin)) {
+                    loader.options.plugins.push(plugin);
+                  }
+                });
+              }
+            });
+          }
+        }
+      });
+      
+      // Add babel-loader if not found
+      if (!babelLoaderFound) {
+        config.module.rules.push({
+          test: /\.(js|mjs|jsx|ts|tsx)$/,
+          exclude: /node_modules/,
+          use: {
+            loader: 'babel-loader',
+            options: {
+              presets: [
+                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
+                ['@babel/preset-react', { runtime: 'automatic' }],
+                ['@babel/preset-typescript', { 
+                  isTSX: true,
+                  allExtensions: true
+                }]
+              ],
+              plugins: [
+                '@babel/plugin-transform-runtime',
+                '@babel/plugin-syntax-dynamic-import',
+                'babel-plugin-dynamic-import-node'
+              ]
+            }
+          }
+        });
+      }
     }
 
     // LS entrypoint

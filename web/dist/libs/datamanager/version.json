@@ -1,6 +1,0 @@
-{
-  "message": "fix: DIA-1907: [FE] TypeError: Failed to fetch (#7289)",
-  "commit": "294067c677b27ed405527ff49958cec461353351",
-  "date": "2025-04-01T11:13:22.000Z",
-  "branch": "develop"
-}
