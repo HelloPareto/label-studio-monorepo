@@ -1,5 +1,5 @@
 {
-  "name": "@humansignal/design-tokens-converter",
+  "name": "@pareto-engineering/label-studio-design-tokens-converter",
   "version": "0.0.1",
   "description": "Design tokens converter",
   "type": "module",

@@ -1,5 +1,5 @@
 {
-  "name": "@humansignal/version",
+  "name": "@pareto-engineering/label-studio-version",
   "version": "0.0.1",
   "description": "Version generator for internal libraries",
   "main": "version.mjs",

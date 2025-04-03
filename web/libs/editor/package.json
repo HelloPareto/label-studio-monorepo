@@ -1,8 +1,21 @@
 {
-  "name": "@humansignal/editor",
-  "version": "0.0.0",
+  "name": "@pareto-engineering/label-studio-editor",
+  "version": "1.0.1",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["*"],
   "license": "MIT",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pareto-engineering/label-studio-editor.git"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
   "dependencies": {
     "@ant-design/colors": "6.0.0",
     "@ant-design/icons": "4.8.1",
@@ -40,6 +53,5 @@
     "strman": "^2.0.1",
     "wavesurfer.js": "^6.0.1",
     "xpath-range": "^1.1.1"
-  },
-  "main": "src/index.js"
+  }
 }

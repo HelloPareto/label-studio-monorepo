@@ -1,5 +1,5 @@
 {
-  "name": "@humansignal/source",
+  "name": "@pareto-engineering/label-studio-source",
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
@@ -35,7 +35,9 @@
     "postinstall": "npx -y copy-files-from-to",
     "design-tokens": "nx design-tokens ui",
     "storybook:serve": "nx storybook storybook",
-    "storybook:build": "nx build-storybook storybook"
+    "storybook:build": "nx build-storybook storybook",
+    "editor:build-npm": "NODE_ENV=production NX_TASK_TARGET_PROJECT=editor yarn nx build editor --prod && cp libs/editor/package.template.json dist/libs/editor/package.json",
+    "editor:publish": "cd dist/libs/editor && npm publish --access public"
   },
   "husky": {
     "hooks": {
