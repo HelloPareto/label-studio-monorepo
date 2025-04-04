@@ -1,0 +1,23 @@
+{
+  "name": "@pareto-engineering/label-studio-editor",
+  "version": "1.0.9",
+  "description": "Label Studio Editor Component",
+  "main": "index.js",
+  "module": "index.esm.js",
+  "types": "index.d.ts",
+  "files": [
+    "*"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pareto-engineering/label-studio-editor.git"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+} 
