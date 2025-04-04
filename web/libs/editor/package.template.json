@@ -1,6 +1,6 @@
 {
   "name": "@pareto-engineering/label-studio-editor",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Label Studio Editor Component",
   "main": "index.js",
   "module": "index.esm.js",
