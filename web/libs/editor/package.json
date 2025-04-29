@@ -1,9 +1,12 @@
 {
   "name": "@pareto-engineering/label-studio-editor",
-  "version": "1.0.9",
-  "main": "index.js",
+  "version": "1.0.15",
+  "main": "index.esm.js",
   "types": "index.d.ts",
-  "files": ["*"],
+  "type": "module",
+  "files": [
+    "*"
+  ],
   "license": "MIT",
   "publishConfig": {
     "access": "public"

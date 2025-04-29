@@ -6,57 +6,69 @@ const { merge } = require("webpack-merge");
 
 require("dotenv").config({
   // resolve the .env file in the root of the project ../
-  path: path.resolve(__dirname, "../.env"),
+  path: path.resolve(__dirname, "../.env")
 });
 
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const { EnvironmentPlugin, DefinePlugin, ProgressPlugin, optimize } = require("webpack");
+const {
+  EnvironmentPlugin,
+  DefinePlugin,
+  ProgressPlugin,
+  optimize
+} = require("webpack");
 const TerserPlugin = require("terser-webpack-plugin");
 const CssMinimizerPlugin = require("css-minimizer-webpack-plugin");
 
 const RELEASE = require("./release").getReleaseName();
 
 const css_prefix = "lsf-";
-const mode = process.env.BUILD_MODULE ? "production" : process.env.NODE_ENV || "development";
+const mode = process.env.BUILD_MODULE
+  ? "production"
+  : process.env.NODE_ENV || "development";
 const isDevelopment = mode !== "production";
-const devtool = process.env.NODE_ENV === "production" ? "source-map" : "cheap-module-source-map";
+const devtool =
+  process.env.NODE_ENV === "production"
+    ? "source-map"
+    : "cheap-module-source-map";
 const FRONTEND_HMR = process.env.FRONTEND_HMR === "true";
-const FRONTEND_HOSTNAME = FRONTEND_HMR ? process.env.FRONTEND_HOSTNAME || "http://localhost:8010" : "";
+const FRONTEND_HOSTNAME = FRONTEND_HMR
+  ? process.env.FRONTEND_HOSTNAME || "http://localhost:8010"
+  : "";
 const DJANGO_HOSTNAME = process.env.DJANGO_HOSTNAME || "http://localhost:8080";
 const HMR_PORT = FRONTEND_HMR ? +new URL(FRONTEND_HOSTNAME).port : 8010;
 
 const LOCAL_ENV = {
   NODE_ENV: mode,
   CSS_PREFIX: css_prefix,
-  RELEASE_NAME: RELEASE,
+  RELEASE_NAME: RELEASE
 };
 
 const BUILD = {
-  NO_MINIMIZE: isDevelopment || !!process.env.BUILD_NO_MINIMIZATION,
+  NO_MINIMIZE: isDevelopment || !!process.env.BUILD_NO_MINIMIZATION
 };
 
 const plugins = [
   new MiniCssExtractPlugin(),
   new DefinePlugin({
-    "process.env.CSS_PREFIX": JSON.stringify(css_prefix),
+    "process.env.CSS_PREFIX": JSON.stringify(css_prefix)
   }),
-  new EnvironmentPlugin(LOCAL_ENV),
+  new EnvironmentPlugin(LOCAL_ENV)
 ];
 
 const optimizer = () => {
   const result = {
     minimize: true,
-    minimizer: [],
+    minimizer: []
   };
 
   if (mode === "production") {
     result.minimizer.push(
       new TerserPlugin({
-        parallel: true,
+        parallel: true
       }),
       new CssMinimizerPlugin({
-        parallel: true,
-      }),
+        parallel: true
+      })
     );
   }
 
@@ -66,7 +78,11 @@ const optimizer = () => {
   }
 
   // These settings are now applied in both standalone mode and for editor builds
-  if (process.env.MODE === "standalone" || (process.env.NX_TASK_TARGET_PROJECT === 'editor' && process.env.NODE_ENV === 'production')) {
+  if (
+    process.env.MODE === "standalone" ||
+    (process.env.NX_TASK_TARGET_PROJECT === "editor" &&
+      process.env.NODE_ENV === "production")
+  ) {
     result.runtimeChunk = false;
     result.splitChunks = { cacheGroups: { default: false } };
   }
@@ -78,59 +94,45 @@ const optimizer = () => {
 module.exports = composePlugins(
   withNx({
     nx: {
-      svgr: true,
+      svgr: true
     },
-    skipTypeChecking: true,
+    skipTypeChecking: true
   }),
   withReact({ svgr: true }),
-  (config) => {
-
+  config => {
     // Configure for npm package when building editor in production
-    if (process.env.NX_TASK_TARGET_PROJECT === 'editor' && process.env.NODE_ENV === 'production') {
+    if (
+      process.env.NX_TASK_TARGET_PROJECT === "editor" &&
+      process.env.NODE_ENV === "production"
+    ) {
+      config.experiments = { outputModule: true };
       // Set library output configuration
       config.output = {
         ...config.output,
-        library: {
-          type: 'umd',
-          name: 'LabelStudioEditor',
-          umdNamedDefine: true,
-        },
-        globalObject: 'this',
-        filename: 'index.js',
-        // Ensure no chunking for library builds - all code in single file
-        chunkFilename: 'index.js',
-        // Prevent dynamic chunks with content hash
-        assetModuleFilename: '[name][ext]',
+        library: { type: "module" },
+        filename: "[name].esm.js"
       };
-      
+
       // Ensure externals for peer dependencies
       config.externals = {
-        react: {
-          commonjs: 'react',
-          commonjs2: 'react',
-          amd: 'react',
-          root: 'React',
-        },
-        'react-dom': {
-          commonjs: 'react-dom',
-          commonjs2: 'react-dom',
-          amd: 'react-dom',
-          root: 'ReactDOM',
-        },
+        react: "react",
+        "react-dom": "react-dom",
+        "react-jsx-runtime": "react-jsx-runtime"
       };
-      
+
       // Completely disable code splitting for library builds
       config.optimization = {
-        minimize: mode === 'production',
+        minimize: mode === "production",
         runtimeChunk: false,
         splitChunks: false,
-        moduleIds: 'named',
-        chunkIds: 'named'
+        moduleIds: "named",
+        chunkIds: "named"
       };
 
       // Force single entry point for library build
       config.entry = {
         index: config.entry.main
+        // index: path.resolve(__dirname, "libs/editor/src/index.js")
       };
 
       // Create a custom rule to inline all workers and prevent chunking
@@ -139,15 +141,21 @@ module.exports = composePlugins(
         exclude: /node_modules/,
         use: [
           {
-            loader: 'babel-loader',
+            loader: "babel-loader",
             options: {
               presets: [
-                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
-                ['@babel/preset-typescript', { isTSX: true, allExtensions: true }]
+                [
+                  "@babel/preset-env",
+                  { targets: { browsers: "last 2 versions" } }
+                ],
+                [
+                  "@babel/preset-typescript",
+                  { isTSX: true, allExtensions: true }
+                ]
               ],
               plugins: [
-                '@babel/plugin-transform-runtime',
-                'babel-plugin-dynamic-import-node'
+                "@babel/plugin-transform-runtime",
+                "babel-plugin-dynamic-import-node"
               ]
             }
           }
@@ -156,65 +164,84 @@ module.exports = composePlugins(
 
       // Add at the beginning of rules array to ensure it's processed first
       config.module.rules.unshift(customWorkerRule);
-      
+
       // Also specifically handle the SplitChannelWorker case
       config.module.rules.unshift({
         test: /SplitChannelWorker\.ts$/,
-        include: [path.resolve(__dirname, "libs/editor/src/lib/AudioUltra/Media")],
+        include: [
+          path.resolve(__dirname, "libs/editor/src/lib/AudioUltra/Media")
+        ],
         use: [
           {
-            loader: 'babel-loader',
+            loader: "babel-loader",
             options: {
               presets: [
-                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
-                ['@babel/preset-typescript', { isTSX: true, allExtensions: true }]
+                [
+                  "@babel/preset-env",
+                  { targets: { browsers: "last 2 versions" } }
+                ],
+                [
+                  "@babel/preset-typescript",
+                  { isTSX: true, allExtensions: true }
+                ]
               ],
               plugins: [
-                '@babel/plugin-transform-runtime',
-                'babel-plugin-dynamic-import-node'
+                "@babel/plugin-transform-runtime",
+                "babel-plugin-dynamic-import-node"
               ]
             }
           }
         ]
       });
-      
+
       // Fix for dynamic imports of web workers in webpack
       config.plugins.push(
         new DefinePlugin({
-          'import.meta.url': 'globalThis.location.href',
+          "import.meta.url": "globalThis.location.href"
         })
       );
-      
+
       // Find or add babel-loader
       let babelLoaderFound = false;
-      
+
       config.module.rules.forEach(rule => {
-        if (rule.test && (rule.test.toString().includes('tsx') || rule.test.toString().includes('jsx'))) {
+        if (
+          rule.test &&
+          (rule.test.toString().includes("tsx") ||
+            rule.test.toString().includes("jsx"))
+        ) {
           if (Array.isArray(rule.use)) {
             rule.use.forEach(loader => {
-              if (typeof loader === 'object' && loader.loader && loader.loader.includes('babel-loader')) {
+              if (
+                typeof loader === "object" &&
+                loader.loader &&
+                loader.loader.includes("babel-loader")
+              ) {
                 babelLoaderFound = true;
                 if (!loader.options) loader.options = {};
                 if (!loader.options.presets) loader.options.presets = [];
-                
+
                 // Ensure TypeScript support
-                const tsPreset = '@babel/preset-typescript';
+                const tsPreset = "@babel/preset-typescript";
                 if (!loader.options.presets.includes(tsPreset)) {
-                  loader.options.presets.push([tsPreset, { 
-                    isTSX: true,
-                    allExtensions: true
-                  }]);
+                  loader.options.presets.push([
+                    tsPreset,
+                    {
+                      isTSX: true,
+                      allExtensions: true
+                    }
+                  ]);
                 }
-                
+
                 if (!loader.options.plugins) loader.options.plugins = [];
-                
+
                 // Add plugins to transform imports rather than split them
                 const pluginsToAdd = [
-                  '@babel/plugin-transform-runtime',
-                  '@babel/plugin-syntax-dynamic-import',
-                  'babel-plugin-dynamic-import-node'
+                  "@babel/plugin-transform-runtime",
+                  "@babel/plugin-syntax-dynamic-import",
+                  "babel-plugin-dynamic-import-node"
                 ];
-                
+
                 pluginsToAdd.forEach(plugin => {
                   if (!loader.options.plugins.includes(plugin)) {
                     loader.options.plugins.push(plugin);
@@ -225,27 +252,33 @@ module.exports = composePlugins(
           }
         }
       });
-      
+
       // Add babel-loader if not found
       if (!babelLoaderFound) {
         config.module.rules.push({
           test: /\.(js|mjs|jsx|ts|tsx)$/,
           exclude: /node_modules/,
           use: {
-            loader: 'babel-loader',
+            loader: "babel-loader",
             options: {
               presets: [
-                ['@babel/preset-env', { targets: { browsers: 'last 2 versions' } }],
-                ['@babel/preset-react', { runtime: 'automatic' }],
-                ['@babel/preset-typescript', { 
-                  isTSX: true,
-                  allExtensions: true
-                }]
+                [
+                  "@babel/preset-env",
+                  { targets: { browsers: "last 2 versions" } }
+                ],
+                ["@babel/preset-react", { runtime: "automatic" }],
+                [
+                  "@babel/preset-typescript",
+                  {
+                    isTSX: true,
+                    allExtensions: true
+                  }
+                ]
               ],
               plugins: [
-                '@babel/plugin-transform-runtime',
-                '@babel/plugin-syntax-dynamic-import',
-                'babel-plugin-dynamic-import-node'
+                "@babel/plugin-transform-runtime",
+                "@babel/plugin-syntax-dynamic-import",
+                "babel-plugin-dynamic-import-node"
               ]
             }
           }
@@ -254,18 +287,24 @@ module.exports = composePlugins(
     }
 
     // LS entrypoint
-    if (process.env.MODE !== "standalone") {
+    if (
+      process.env.NX_TASK_TARGET_PROJECT !== "editor" &&
+      process.env.MODE !== "standalone"
+    ) {
       config.entry = {
         main: {
-          import: path.resolve(__dirname, "apps/labelstudio/src/main.tsx"),
-        },
+          import: path.resolve(__dirname, "apps/labelstudio/src/main.tsx")
+        }
       };
 
       config.output = {
         ...config.output,
         uniqueName: "labelstudio",
-        publicPath: isDevelopment && FRONTEND_HOSTNAME ? `${FRONTEND_HOSTNAME}/react-app/` : "auto",
-        scriptType: "text/javascript",
+        publicPath:
+          isDevelopment && FRONTEND_HOSTNAME
+            ? `${FRONTEND_HOSTNAME}/react-app/`
+            : "auto",
+        scriptType: "text/javascript"
       };
 
       config.optimization = {
@@ -276,22 +315,22 @@ module.exports = composePlugins(
             commonVendor: {
               test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|mobx|mobx-react|mobx-react-lite|mobx-state-tree)[\\/]/,
               name: "vendor",
-              chunks: "all",
+              chunks: "all"
             },
             defaultVendors: {
               test: /[\\/]node_modules[\\/]/,
               priority: -10,
               reuseExistingChunk: true,
-              chunks: "async",
+              chunks: "async"
             },
             default: {
               minChunks: 2,
               priority: -20,
               reuseExistingChunk: true,
-              chunks: "async",
-            },
-          },
-        },
+              chunks: "async"
+            }
+          }
+        }
       };
     }
 
@@ -299,31 +338,34 @@ module.exports = composePlugins(
       fs: false,
       path: false,
       crypto: false,
-      worker_threads: false,
+      worker_threads: false
     };
 
     config.experiments = {
+      ...config.experiments,
       cacheUnaffected: true,
       syncWebAssembly: true,
-      asyncWebAssembly: true,
+      asyncWebAssembly: true
     };
 
-    config.module.rules.forEach((rule) => {
+    config.module.rules.forEach(rule => {
       const testString = rule.test.toString();
       const isScss = testString.includes("scss");
       const isCssModule = testString.includes(".module");
 
       if (isScss) {
-        rule.oneOf.forEach((loader) => {
+        rule.oneOf.forEach(loader => {
           if (loader.use) {
-            const cssLoader = loader.use.find((use) => use.loader && use.loader.includes("css-loader"));
+            const cssLoader = loader.use.find(
+              use => use.loader && use.loader.includes("css-loader")
+            );
 
             if (cssLoader && cssLoader.options) {
               cssLoader.options.modules = {
                 mode: "local",
                 auto: true,
                 namedExport: false,
-                localIdentName: "[local]--[hash:base64:5]",
+                localIdentName: "[local]--[hash:base64:5]"
               };
             }
           }
@@ -331,7 +373,7 @@ module.exports = composePlugins(
       }
 
       if (rule.test.toString().match(/scss|sass/) && !isCssModule) {
-        const r = rule.oneOf.filter((r) => {
+        const r = rule.oneOf.filter(r => {
           // we don't need rules that don't have loaders
           if (!r.use) return false;
 
@@ -342,15 +384,22 @@ module.exports = composePlugins(
           if (testString.match(/module|raw/)) return false;
 
           // we only target pre-processors that has 'css-loader included'
-          return testString.match(/scss|sass/) && r.use.some((u) => u.loader && u.loader.includes("css-loader"));
+          return (
+            testString.match(/scss|sass/) &&
+            r.use.some(u => u.loader && u.loader.includes("css-loader"))
+          );
         });
 
-        r.forEach((_r) => {
-          const cssLoader = _r.use.find((use) => use.loader && use.loader.includes("css-loader"));
+        r.forEach(_r => {
+          const cssLoader = _r.use.find(
+            use => use.loader && use.loader.includes("css-loader")
+          );
 
           if (!cssLoader) return;
 
-          const isSASS = _r.use.some((use) => use.loader && use.loader.match(/sass|scss/));
+          const isSASS = _r.use.some(
+            use => use.loader && use.loader.match(/sass|scss/)
+          );
 
           if (isSASS) _r.exclude = /node_modules/;
 
@@ -359,7 +408,7 @@ module.exports = composePlugins(
               localIdentName: `${css_prefix}[local]`, // Customize this format
               getLocalIdent(_ctx, _ident, className) {
                 if (className.includes("ant")) return className;
-              },
+              }
             };
           }
         });
@@ -378,24 +427,24 @@ module.exports = composePlugins(
           {
             loader: "@svgr/webpack",
             options: {
-              ref: true,
-            },
+              ref: true
+            }
           },
-          "url-loader",
-        ],
+          "url-loader"
+        ]
       },
       {
         test: /\.xml$/,
         exclude: /node_modules/,
-        loader: "url-loader",
+        loader: "url-loader"
       },
       {
         test: /\.wasm$/,
         type: "javascript/auto",
         loader: "file-loader",
         options: {
-          name: "[name].[ext]",
-        },
+          name: "[path][name].[ext]"
+        }
       },
       // tailwindcss
       {
@@ -406,18 +455,18 @@ module.exports = composePlugins(
           {
             loader: "css-loader",
             options: {
-              importLoaders: 1,
-            },
+              importLoaders: 1
+            }
           },
-          "postcss-loader",
-        ],
-      },
+          "postcss-loader"
+        ]
+      }
     );
 
     if (isDevelopment) {
       config.optimization = {
         ...config.optimization,
-        moduleIds: "named",
+        moduleIds: "named"
       };
     }
 
@@ -427,7 +476,7 @@ module.exports = composePlugins(
       "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
       "react-joyride": path.resolve(__dirname, "node_modules/react-joyride"),
       "@humansignal/ui": path.resolve(__dirname, "libs/ui"),
-      "@humansignal/core": path.resolve(__dirname, "libs/core"),
+      "@humansignal/core": path.resolve(__dirname, "libs/core")
     };
 
     return merge(config, {
@@ -446,11 +495,14 @@ module.exports = composePlugins(
               // Allow cross-origin requests from Django
               headers: { "Access-Control-Allow-Origin": "*" },
               static: {
-                directory: path.resolve(__dirname, "../label_studio/core/static/"),
-                publicPath: "/static/",
+                directory: path.resolve(
+                  __dirname,
+                  "../label_studio/core/static/"
+                ),
+                publicPath: "/static/"
               },
               devMiddleware: {
-                publicPath: `${FRONTEND_HOSTNAME}/react-app/`,
+                publicPath: `${FRONTEND_HOSTNAME}/react-app/`
               },
               allowedHosts: "all", // Allow access from Django's server
               proxy: {
@@ -458,15 +510,15 @@ module.exports = composePlugins(
                   target: `${DJANGO_HOSTNAME}/api`,
                   changeOrigin: true,
                   pathRewrite: { "^/api": "" },
-                  secure: false,
+                  secure: false
                 },
                 "/": {
                   target: `${DJANGO_HOSTNAME}`,
                   changeOrigin: true,
-                  secure: false,
-                },
-              },
-            },
+                  secure: false
+                }
+              }
+            }
     });
-  },
+  }
 );
