@@ -486,7 +486,12 @@ module.exports = composePlugins(
       optimization: optimizer(),
       devServer:
         process.env.MODE === "standalone"
-          ? {}
+          ? {
+              port: 3000,
+              hot: true,
+              historyApiFallback: true,
+              allowedHosts: "all"
+            }
           : {
               // Port for the Webpack dev server
               port: HMR_PORT,

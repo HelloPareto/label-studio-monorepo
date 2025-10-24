@@ -5,7 +5,7 @@ module.exports = {
   bail: true,
   roots: ["<rootDir>/src"],
   preset: "ts-jest",
-  setupFilesAfterEnv: ["./jest.setup.js"],
+  setupFilesAfterEnv: ["./jest.setup.cjs"],
   testEnvironment: "jsdom",
   verbose: false,
   collectCoverageFrom: ["**/*.{js,jsx,ts,tsx}", "!**/*.d.ts", "!**/node_modules/**", "!**/examples/**"],
