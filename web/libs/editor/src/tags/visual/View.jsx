@@ -112,6 +112,7 @@ const Model = types
       "list",
       "dialog",
       "textarea",
+      "llmtextarea",
       "pairwise",
       "style",
       "relations",

@@ -54,6 +54,7 @@ const Result = types
       "number",
       "taxonomy",
       "textarea",
+      "llmtextarea",
       "rating",
       "pairwise",
       "videorectangle",
@@ -67,6 +68,7 @@ const Result = types
       rating: types.maybe(types.number),
       item_index: types.maybeNull(types.number),
       text: types.maybe(types.union(types.string, types.array(types.string))),
+      llmtextarea: types.frozen(),
       choices: types.maybe(types.array(types.union(types.string, types.array(types.string)))),
       // pairwise
       selected: types.maybe(types.enumeration(["left", "right"])),
