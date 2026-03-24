@@ -1,0 +1,60 @@
+{
+  "name": "playground",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/playground/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "outputs": ["{options.outputPath}"],
+      "defaultConfiguration": "development",
+      "options": {
+        "compiler": "babel",
+        "outputPath": "dist/apps/playground",
+        "index": "apps/playground/src/index.html",
+        "baseHref": "/",
+        "main": "apps/playground/src/main.tsx",
+        "tsConfig": "apps/playground/tsconfig.app.json",
+        "assets": [],
+        "styles": [],
+        "scripts": [],
+        "isolatedConfig": true,
+        "webpackConfig": "webpack.config.js"
+      },
+      "configurations": {
+        "development": {
+          "extractLicenses": false,
+          "optimization": false,
+          "sourceMap": true,
+          "vendorChunk": true
+        },
+        "production": {
+          "optimization": true,
+          "sourceMap": false,
+          "namedChunks": false,
+          "extractLicenses": true,
+          "vendorChunk": false
+        }
+      }
+    },
+    "serve": {
+      "executor": "@nx/webpack:dev-server",
+      "defaultConfiguration": "development",
+      "options": {
+        "buildTarget": "playground:build",
+        "hmr": true,
+        "port": 3001
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "playground:build:development"
+        },
+        "production": {
+          "buildTarget": "playground:build:production",
+          "hmr": false
+        }
+      }
+    }
+  },
+  "tags": []
+}

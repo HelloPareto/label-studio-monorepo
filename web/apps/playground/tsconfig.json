@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ESNEXT",
+    "module": "commonjs",
+    "allowJs": true,
+    "checkJs": false,
+    "jsx": "preserve",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "rootDirs": ["./src"]
+  },
+  "exclude": ["./dist"],
+  "files": [],
+  "include": [],
+  "references": [
+    { "path": "./tsconfig.app.json" }
+  ],
+  "extends": "../../tsconfig.base.json"
+}

@@ -20,6 +20,8 @@
     "lsf:unit": "nx run editor:unit",
     "dm:watch": "nx run datamanager:build:development --watch",
     "dm:unit": "nx run datamanager:unit",
+    "pg:serve": "nx run playground:serve:development",
+    "pg:build": "nx run playground:build:production",
     "build": "NODE_ENV=production yarn ls:build",
     "version:libs": "nx run-many --target=version",
     "docs": "SCHEMA_JSON_PATH=$PWD/apps/labelstudio/src/pages/CreateProject/Config/schema.json; nx docs editor && biome check --apply $SCHEMA_JSON_PATH",

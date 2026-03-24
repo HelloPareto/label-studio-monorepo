@@ -286,9 +286,26 @@ module.exports = composePlugins(
       }
     }
 
+    // Playground entrypoint
+    if (process.env.NX_TASK_TARGET_PROJECT === "playground") {
+      config.entry = {
+        main: {
+          import: path.resolve(__dirname, "apps/playground/src/main.tsx")
+        }
+      };
+
+      config.output = {
+        ...config.output,
+        uniqueName: "playground",
+        publicPath: "auto",
+        scriptType: "text/javascript"
+      };
+    }
+
     // LS entrypoint
     if (
       process.env.NX_TASK_TARGET_PROJECT !== "editor" &&
+      process.env.NX_TASK_TARGET_PROJECT !== "playground" &&
       process.env.MODE !== "standalone"
     ) {
       config.entry = {
@@ -485,9 +502,10 @@ module.exports = composePlugins(
       plugins,
       optimization: optimizer(),
       devServer:
-        process.env.MODE === "standalone"
+        process.env.MODE === "standalone" ||
+        process.env.NX_TASK_TARGET_PROJECT === "playground"
           ? {
-              port: 3000,
+              port: process.env.NX_TASK_TARGET_PROJECT === "playground" ? 3001 : 3000,
               hot: true,
               historyApiFallback: true,
               allowedHosts: "all"
