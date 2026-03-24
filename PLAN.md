@@ -194,6 +194,34 @@ Storage: `localStorage` initially, with JSON export/import for persistence.
 
 ---
 
+## Progress
+
+### Phase 1: Build Infrastructure — DONE
+
+Completed 2026-03-24.
+
+- [x] `web/apps/playground/` directory structure (project.json, tsconfig, babelrc, index.html, main.tsx, App.tsx)
+- [x] Webpack config updated — playground entrypoint, simple dev server on port 3001
+- [x] `pg:serve` and `pg:build` scripts added to `web/package.json`
+- [x] `nx run playground:build:development` compiles without errors
+- [x] `nx run playground:serve:development` serves on http://localhost:3001
+- [x] `@humansignal/editor` resolves at bundle time (dynamic import in App.tsx)
+
+**How to run:**
+```bash
+cd web
+yarn pg:serve     # dev server on :3001
+yarn pg:build     # production build to dist/apps/playground
+```
+
+### Phase 2: Behavior Discovery — NOT STARTED
+
+### Phase 3: Replicate Core Behaviors — NOT STARTED
+
+### Phase 4: Revision & Data Tracking — NOT STARTED
+
+---
+
 ## Open Questions
 
 - Should we support loading configs from the LS backend API (for projects that already
