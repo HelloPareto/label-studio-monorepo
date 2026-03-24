@@ -69,14 +69,16 @@ replicate, using `/firefox-repl` to interact with the live app.
 
 1. Use `/firefox-repl` to navigate to https://labelstud.io/playground-app and
    systematically document:
-   - Layout structure (panels, resizers, collapse behavior)
-   - XML editor features (syntax highlighting, autocomplete, error feedback)
+   - Layout structure (four-quadrant: XML editor top-left, preview top-right,
+     data input bottom-left, data output bottom-right; draggable dividers
+     between all panels for resizing)
+   - XML editor features (syntax highlighting, line numbers, placeholder config)
    - Preview panel behavior (how/when it re-renders, loading states, error states)
    - Data input panel (JSON editing, validation, auto-generation from config)
    - Data output panel (annotation result format, live updates vs on-submit)
+   - Bottom bar tabs (Regions, History, Relations, Info)
    - URL parameter handling (`?config=`, `?configUrl=`)
-   - Template system (how templates load, what categories exist)
-   - Theme toggle, share/copy URL functionality
+   - Top bar controls (copy config, share link, theme toggle)
 
 2. For each behavior, classify:
    - **Must have**: core editing + preview loop
@@ -102,19 +104,25 @@ replicate, using `/firefox-repl` to interact with the live app.
 
 #### 3a: Editor + Preview (the core loop)
 
-- Left panel: CodeMirror XML editor with Label Studio tag syntax highlighting
-- Right panel: Live `LabelStudio` instance rendering the annotation interface
-- Horizontal resizable split between panels
+- Top-left panel: CodeMirror XML editor with syntax highlighting and line numbers
+- Top-right panel: Live `LabelStudio` instance rendering the annotation interface
+- Draggable vertical divider between editor and preview (resize by dragging)
+- Draggable horizontal divider between top panels and bottom panels (resize by dragging)
 - Config changes trigger preview re-render (debounced, without MobX destruction)
   - Key insight from old work: do NOT destroy/recreate the LS instance on config change.
     Use `store.assignConfig()` / `store.assignTask()` or re-mount the container cleanly.
 
 #### 3b: Data Input/Output
 
-- Bottom panel (collapsible, vertically resizable)
-- Input tab: JSON editor for task data, with validation
-- Output tab: annotation results displayed as JSON, updated on annotation events
+- Bottom-left half: Data Input — JSON editor for task data (`{}` default)
+- Bottom-right half: Data Output — annotation results as JSON (`[]` default),
+  updated on annotation events
 - Auto-generate dummy data from XML config (parse `$variable` references, infer types)
+
+#### 3b+: Bottom Bar (LS annotation panels)
+
+- Regions, History, Relations, Info tabs at the bottom of the preview area
+- These come from the LS editor instance — may get them for free
 
 #### 3c: Agent-Friendly Affordances
 
@@ -126,12 +134,11 @@ replicate, using `/firefox-repl` to interact with the live app.
 
 ### Simplification Decisions (deviations from LS app)
 
-- **Annotation panel**: inline results display instead of LS's side-column panel system.
-  Simpler DOM, easier for agents to parse.
-- **No template browser**: configs are loaded via URL params or the editor directly.
-  Templates can be a static JSON file that Claude reads, not a UI component.
+- **No template browser**: the live playground has no templates either — just a blank
+  XML editor with a placeholder comment. Configs load via URL params or direct editing.
 - **No auth/project context**: pure client-side, no backend calls.
-- **Minimal chrome**: no top bar branding, no help links. Just editor + preview + data.
+- **Top bar**: replicate the playground's minimal top bar (title + copy/link/theme buttons)
+  rather than the full LS app chrome.
 
 ### Acceptance Criteria
 
