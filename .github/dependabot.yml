@@ -12,3 +12,22 @@ updates:
       - "bot"
     commit-message:
       prefix: "ci:"
+
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      timezone: "Europe/London"
+      time: "09:00"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "bot"
+    commit-message:
+      prefix: "chore:"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"

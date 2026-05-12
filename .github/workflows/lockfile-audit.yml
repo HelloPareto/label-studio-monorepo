@@ -1,0 +1,28 @@
+name: "Lockfile audit"
+
+on:
+  pull_request:
+    paths:
+      - "web/yarn.lock"
+      - "web/package-lock.json"
+      - "yarn.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  check-non-registry-sources:
+    name: "Check for non-registry sources"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if yarn.lock resolves from non-registry sources
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- web/yarn.lock \
+            | grep '^+.*resolved' \
+            | grep -vE '"https://registry\.yarnpkg\.com|https://registry\.npmjs\.org' \
+            && echo "ERROR: Non-registry source detected in yarn.lock" && exit 1 \
+            || echo "OK: all resolved sources are from the npm registry"

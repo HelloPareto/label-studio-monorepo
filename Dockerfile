@@ -34,9 +34,10 @@ RUN yarn config set network-timeout 1200000 # HTTP timeout used when downloading
 COPY web/package.json .
 COPY web/yarn.lock .
 COPY web/tools tools
+RUN yarn audit --groups dependencies
 RUN --mount=type=cache,target=${YARN_CACHE_FOLDER},sharing=locked \
     --mount=type=cache,target=${NX_CACHE_DIRECTORY},sharing=locked \
-    yarn install --prefer-offline --no-progress --pure-lockfile --frozen-lockfile --ignore-engines --non-interactive --production=false
+    yarn install --prefer-offline --no-progress --pure-lockfile --frozen-lockfile --non-interactive --production=false
 
 COPY web .
 COPY pyproject.toml ../pyproject.toml

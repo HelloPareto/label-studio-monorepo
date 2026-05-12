@@ -37,7 +37,8 @@
     "storybook:serve": "nx storybook storybook",
     "storybook:build": "nx build-storybook storybook",
     "editor:build-npm": "NODE_ENV=production NX_TASK_TARGET_PROJECT=editor yarn nx build editor --prod && cp libs/editor/package.template.json dist/libs/editor/package.json",
-    "editor:publish": "cd dist/libs/editor && npm publish --access public"
+    "editor:publish": "cd dist/libs/editor && npm publish --access public",
+    "prepare": "husky .husky"
   },
   "husky": {
     "hooks": {

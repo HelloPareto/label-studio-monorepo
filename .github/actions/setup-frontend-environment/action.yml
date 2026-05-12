@@ -18,6 +18,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Harden runner
+      uses: step-security/harden-runner@v2
+      with:
+        egress-policy: audit
+
     - name: Setup node
       uses: actions/setup-node@v4
       with:
@@ -43,6 +48,11 @@ runs:
     - name: Print Yarn cache size
       shell: bash
       run: du -d 0 -h ${{ steps.yarn-cache-dir-path.outputs.dir }}
+
+    - name: Audit dependencies
+      working-directory: "${{ inputs.directory }}"
+      shell: bash
+      run: yarn audit --groups dependencies
 
     - name: Install yarn dependencies
       working-directory: "${{ inputs.directory }}"

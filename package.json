@@ -1,4 +1,7 @@
 {
+  "engines": {
+    "npm": ">=11.10.0"
+  },
   "devDependencies": {
     "@babel/plugin-transform-runtime": "^7.26.10",
     "@babel/plugin-transform-typescript": "^7.27.0",
