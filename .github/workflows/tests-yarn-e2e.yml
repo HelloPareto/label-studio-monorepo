@@ -39,7 +39,7 @@ jobs:
 
       - name: Install e2e dependencies
         working-directory: ${{ env.FRONTEND_MONOREPO_DIR }}/libs/editor/tests/e2e
-        run: yarn install
+        run: yarn install --frozen-lockfile
 
       - name: Run LSO server
         id: run-lso-server
