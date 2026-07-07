@@ -55,6 +55,7 @@ const Result = types
       "taxonomy",
       "textarea",
       "llmtextarea",
+      "fileupload",
       "rating",
       "pairwise",
       "videorectangle",
