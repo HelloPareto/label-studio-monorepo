@@ -1,0 +1,15 @@
+.file-upload {
+  margin-bottom: 1em;
+
+  &__label {
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+}
