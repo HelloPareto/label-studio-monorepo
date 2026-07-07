@@ -61,6 +61,14 @@ function extractMath(text) {
   return { text: out, segments, nonce };
 }
 
+// Known limitation: this is a plain string substitution into HTML already
+// produced by marked, not a DOM-aware insertion. If a `$...$`/`$$...$$` span
+// ends up inside an attribute-generating markdown construct (e.g. image
+// alt/title, link title), the restored KaTeX markup's own `"`/`<`/`>`
+// characters (e.g. `class="katex"`) can break that attribute's quoting and
+// corrupt the surrounding markup. Not an XSS bypass: `sanitizeHtml` still
+// runs last (see renderLatexMarkdown below) and strips script/iframe/on*
+// regardless of how the markup got mangled.
 function restoreMath(html, segments, nonce) {
   const re = new RegExp(`${MATH_PLACEHOLDER_PREFIX}${nonce}I(\\d+)${MATH_PLACEHOLDER_SUFFIX}`, "g");
 
