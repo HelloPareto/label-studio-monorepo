@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import { sanitizeHtml } from "../../utils/html";
+import { escapeHtml } from "../../utils/utilities";
 
 interface MarkdownProps {
   text: string;
@@ -10,10 +11,12 @@ interface MarkdownProps {
 marked.setOptions({ mangle: false, headerIds: false });
 
 export const Markdown = ({ text, allowHtml = false }: MarkdownProps) => {
-  const rawHtml = marked.parse(text || "");
-  const safeHtml = allowHtml
-    ? sanitizeHtml(rawHtml)
-    : sanitizeHtml(rawHtml);
+  // When allowHtml is falsy, escape raw HTML in the source before marked
+  // parses it, so only markdown-generated markup reaches the DOM (matches
+  // upstream's rehype-raw gating). sanitizeHtml always runs last regardless.
+  const source = allowHtml ? text || "" : escapeHtml(text || "");
+  const rawHtml = marked.parse(source);
+  const safeHtml = sanitizeHtml(rawHtml);
 
   return (
     <div
