@@ -70,6 +70,7 @@ const Result = types
       item_index: types.maybeNull(types.number),
       text: types.maybe(types.union(types.string, types.array(types.string))),
       llmtextarea: types.frozen(),
+      fileupload: types.frozen(),
       choices: types.maybe(types.array(types.union(types.string, types.array(types.string)))),
       // pairwise
       selected: types.maybe(types.enumeration(["left", "right"])),
