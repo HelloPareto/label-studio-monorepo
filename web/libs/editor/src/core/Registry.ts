@@ -1,3 +1,24 @@
+import type React from "react";
+interface CustomTag<ViewTag = unknown> {
+  tag: string;
+  isObject?: boolean;
+  model: { name: string };
+  description?: string;
+  view: React.ComponentType<ViewTag>;
+  detector?: (value: object) => boolean;
+  resultName?: string;
+  result?: any;
+  region?: {
+    name: string;
+    nodeView: {
+      name: string;
+      icon: any;
+      getContent?: (node: any) => JSX.Element | null;
+      fullContent?: (node: any) => JSX.Element | null;
+    };
+  };
+}
+
 /**
  * Class for register View
  */
@@ -7,6 +28,7 @@ class _Registry {
   views: Record<string, any> = {};
   regions: any[] = [];
   objects: any[] = [];
+  customTags: Array<CustomTag<any>> = [];
   // list of available areas per object type
   areas = new Map();
 
@@ -110,6 +132,17 @@ class _Registry {
 
   getPerRegionView(tag: string | number, mode: string | number) {
     return this.perRegionViews[tag]?.[mode];
+  }
+
+  addCustomTag<ViewTag = unknown>(tag: string, definition: CustomTag<ViewTag>) {
+    this.addTag(tag.toLowerCase(), definition.model, definition.view);
+    if (definition.isObject) {
+      this.addObjectType(definition.model);
+    }
+    if (definition.region) {
+      this.addRegionType(definition.region, definition.model.name, definition.detector);
+    }
+    this.customTags.push(definition);
   }
 }
 
