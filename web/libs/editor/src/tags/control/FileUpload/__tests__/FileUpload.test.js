@@ -1,6 +1,7 @@
 /* global describe, it, expect, beforeEach, afterEach, jest */
 import { unprotect } from "mobx-state-tree";
 import { FileUploadModel } from "../FileUpload";
+import InfoModal from "../../../../components/Infomodal/Infomodal";
 
 jest.mock("../../../../components/Infomodal/Infomodal", () => ({
   __esModule: true,
@@ -53,6 +54,9 @@ describe("FileUpload Model", () => {
       token: "test-token",
       assignmentId: "42",
     };
+
+    InfoModal.warning.mockClear();
+    InfoModal.error.mockClear();
   });
 
   afterEach(() => {
@@ -285,6 +289,23 @@ describe("FileUpload Model", () => {
 
       expect(model.files.length).toBe(2);
       expect(model.canAddMore).toBe(false);
+
+      // dropped file(s) must surface user-visible feedback, not silent truncation
+      expect(InfoModal.error).toHaveBeenCalledTimes(1);
+      expect(InfoModal.error.mock.calls[0][0]).toMatch(/1 file/i);
+    });
+
+    it("does not surface feedback when every file fits under the cap", async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      expect(model.files.length).toBe(1);
+      expect(InfoModal.error).not.toHaveBeenCalled();
     });
   });
 
@@ -340,7 +361,11 @@ describe("FileUpload Model", () => {
 
       const abortCalls = global.fetch.mock.calls.filter(([url]) => url.includes("/abort/"));
 
-      expect(abortCalls.length).toBeGreaterThanOrEqual(1);
+      // abortAllPending's own abort fires synchronously; uploadFile's catch
+      // must see entry.aborted and skip its own duplicate abort/ call once
+      // the (now-failed) in-flight PUT settles.
+      expect(abortCalls.length).toBe(1);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
   });
 

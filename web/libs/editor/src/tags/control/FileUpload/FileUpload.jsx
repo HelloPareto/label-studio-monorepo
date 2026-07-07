@@ -70,6 +70,10 @@ const FileEntryModel = types
     fileId: types.maybeNull(types.string),
     uploadId: types.maybeNull(types.string),
     error: types.maybeNull(types.string),
+    // Set when a cleanup path (removeFile/abortAllPending) has already
+    // fired the backend abort/ call, so uploadFile's own failure handler
+    // doesn't fire it again for the same entry (see markAborted).
+    aborted: types.optional(types.boolean, false),
   })
   .actions((self) => ({
     setUploading() {
@@ -93,6 +97,12 @@ const FileEntryModel = types
       self.status = "error";
       self.error = message || "Upload failed";
     },
+    // Marks that a caller outside uploadFile's own failure path (removeFile,
+    // abortAllPending) already issued the best-effort backend abort for
+    // this entry, so uploadFile must not issue a duplicate one.
+    markAborted() {
+      self.aborted = true;
+    },
   }));
 
 /**
@@ -109,6 +119,13 @@ const FileEntryModel = types
  *
  * Upload host/auth are injected at runtime via `window.ForteUpload`, see
  * `getUploadConfig` in this file's source — never via XML attributes.
+ *
+ * Deployment prerequisite: the target S3 bucket's CORS configuration must
+ * set `ExposeHeaders: ["ETag"]` on the rule covering these PUT requests.
+ * Browsers only expose response headers explicitly listed there to page
+ * JS; without it, `putRes.headers.get("ETag")` always returns null and
+ * every upload fails at "Part N upload did not return an ETag" — this
+ * works in tests only because they mock the header directly.
  *
  * @example
  * <!--Basic file upload attached to a text task -->
@@ -130,7 +147,7 @@ const FileEntryModel = types
  * @param {string} [label]               - Label text shown above the picker
  * @param {number} [maxFiles=1]          - Maximum number of files that can be attached
  * @param {string} [accept]              - Comma-separated MIME types / extensions accepted by the file picker
- * @param {string} [fileType=Generic]    - Backend `File.type` value to tag the upload with (Video|Text|Image|PDF|Audio|Generic|Resume)
+ * @param {string} [fileType=Generic]    - Backend `File.type` value to tag the upload with (Video|Text|Image|PDF|Audio|report|Generic|Resume)
  * @param {boolean} [required=false]     - Validate that at least one file has been uploaded
  * @param {string} [requiredMessage]     - Message to show if validation fails
  */
@@ -238,6 +255,7 @@ const Model = types
         try {
           const cfg = getUploadConfig();
 
+          entry.markAborted();
           self.abortRemote(cfg, entry.fileId, entry.uploadId);
         } catch (e) {
           // no runtime config available; nothing to abort remotely
@@ -265,6 +283,7 @@ const Model = types
           try {
             const cfg = getUploadConfig();
 
+            entry.markAborted();
             self.abortRemote(cfg, entry.fileId, entry.uploadId);
           } catch (e) {
             // no runtime config available; nothing to abort remotely
@@ -280,6 +299,13 @@ const Model = types
       const files = Array.from(fileList || []);
       const room = self.maxFilesInt - self.files.length;
       const accepted = files.slice(0, Math.max(0, room));
+      const dropped = files.length - accepted.length;
+
+      if (dropped > 0) {
+        InfoModal.error(
+          `Only ${self.maxFilesInt} file${self.maxFilesInt === 1 ? "" : "s"} can be attached; ${dropped} file${dropped === 1 ? "" : "s"} ${dropped === 1 ? "was" : "were"} not added.`,
+        );
+      }
 
       const entries = accepted.map((file) =>
         FileEntryModel.create({
@@ -384,7 +410,13 @@ const Model = types
       // later, so any failure here always aborts instead of confirming.
       if (failure || parts.length !== presignedUrls.length) {
         entry.setError(failure?.message || "Upload failed");
-        await self.abortRemote(cfg, fileId, uploadId);
+        // A concurrent removeFile/abortAllPending may have already fired
+        // the backend abort for this entry (e.g. this failure is the
+        // rejected fetch from that same controller.abort() call) — don't
+        // send a second best-effort abort/ request for the same upload.
+        if (!entry.aborted) {
+          await self.abortRemote(cfg, fileId, uploadId);
+        }
         self._controllers.delete(entry.id);
         return;
       }
@@ -407,7 +439,9 @@ const Model = types
         self.updateResult();
       } catch (e) {
         entry.setError(e.message);
-        await self.abortRemote(cfg, fileId, uploadId);
+        if (!entry.aborted) {
+          await self.abortRemote(cfg, fileId, uploadId);
+        }
       } finally {
         self._controllers.delete(entry.id);
       }
