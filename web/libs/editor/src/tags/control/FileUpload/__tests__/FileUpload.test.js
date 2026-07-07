@@ -380,4 +380,36 @@ describe("FileUpload Model", () => {
       expect(model.updateResult).toHaveBeenCalled();
     });
   });
+
+  describe("authHeaders token normalization", () => {
+    it("prepends 'Token ' when the configured token is raw", async () => {
+      global.window.ForteUpload.token = "raw-token";
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      const [, initOpts] = global.fetch.mock.calls[0];
+
+      expect(initOpts.headers.Authorization).toBe("Token raw-token");
+    });
+
+    it("passes an already-prefixed token through verbatim", async () => {
+      global.window.ForteUpload.token = "Token already-prefixed";
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      const [, initOpts] = global.fetch.mock.calls[0];
+
+      expect(initOpts.headers.Authorization).toBe("Token already-prefixed");
+    });
+  });
 });

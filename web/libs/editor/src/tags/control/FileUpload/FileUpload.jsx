@@ -31,7 +31,7 @@ const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB, matches S3 multipart minimum part si
  * ```js
  * window.ForteUpload = {
  *   baseUrl: "https://forte-backend.example.com",
- *   token: "<knox-token>",
+ *   token: "<knox-token>", // raw token preferred; a "Token "-prefixed value is also accepted
  *   assignmentId: "123",
  * };
  * ```
@@ -52,9 +52,10 @@ function attachmentsBase(cfg) {
 }
 
 function authHeaders(cfg) {
+  const token = cfg.token.startsWith("Token ") ? cfg.token : `Token ${cfg.token}`;
   return {
     "Content-Type": "application/json",
-    Authorization: `Token ${cfg.token}`,
+    Authorization: token,
   };
 }
 
