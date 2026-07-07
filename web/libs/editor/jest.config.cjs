@@ -62,5 +62,5 @@ module.exports = {
   },
   testPathIgnorePatterns: ["/node_modules/", "/e2e/"],
   testRegex: "__tests__/.*.test.[tj]sx?",
-  transformIgnorePatterns: ["node_modules/(?!(nanoid|konva)/)"],
+  transformIgnorePatterns: ["node_modules/(?!(nanoid|konva|chroma-js|@thi\\.ng)/)"],
 };
