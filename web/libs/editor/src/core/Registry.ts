@@ -66,6 +66,24 @@ class _Registry {
     return this.objects;
   }
 
+  /**
+   * Sorted list of registered tag names, for runtime introspection
+   * (e.g. verifying a bundle actually contains the tags you expect).
+   * @return {string[]}
+   */
+  registeredTags() {
+    return [...new Set(this.tags)].map(String).sort();
+  }
+
+  /**
+   * Sorted list of registered object type model names (cheap, derived
+   * from the same registration data as registeredTags()).
+   * @return {string[]}
+   */
+  registeredObjectTypes() {
+    return [...new Set(this.objects.map((o: { name: string | number }) => String(o.name)))].sort();
+  }
+
   modelsArr() {
     return Object.values(this.models);
   }
