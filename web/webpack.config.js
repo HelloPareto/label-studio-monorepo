@@ -50,7 +50,8 @@ const BUILD = {
 const plugins = [
   new MiniCssExtractPlugin(),
   new DefinePlugin({
-    "process.env.CSS_PREFIX": JSON.stringify(css_prefix)
+    "process.env.CSS_PREFIX": JSON.stringify(css_prefix),
+    "process.env.EDITOR_BUILD_DATE": JSON.stringify(new Date().toISOString())
   }),
   new EnvironmentPlugin(LOCAL_ENV)
 ];
