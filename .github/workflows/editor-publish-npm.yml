@@ -88,7 +88,10 @@ jobs:
         run: |
           set -euo pipefail
           npm install --global yarn@1.22
-          yarn install --frozen-lockfile
+          # --ignore-engines: some transitive dev-server deps (e.g.
+          # webpack-dev-middleware) declare node >= 20.9, but the editor is built
+          # on node 18 and never loads them in a --prod build.
+          yarn install --frozen-lockfile --ignore-engines
 
       - name: Build editor package
         working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
