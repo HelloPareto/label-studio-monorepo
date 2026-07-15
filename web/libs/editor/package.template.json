@@ -12,7 +12,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/pareto-engineering/label-studio-editor.git"
+    "url": "git+https://github.com/HelloPareto/label-studio-monorepo.git",
+    "directory": "web/libs/editor"
   },
   "peerDependencies": {
     "react": "^18.2.0",

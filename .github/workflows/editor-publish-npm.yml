@@ -1,0 +1,140 @@
+name: "Editor: publish to npm"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        type: choice
+        required: true
+        default: stage
+        options:
+          # pack + validate the tarball only; no registry auth, nothing uploaded
+          - dry-run
+          # full OIDC auth; submit to npm's staging area. A maintainer must approve
+          # it with 2FA before it goes live. Run this on a PR to validate auth.
+          - stage
+          # full OIDC auth; publish directly and go live immediately
+          - publish
+
+env:
+  FRONTEND_MONOREPO_DIR: "web"
+  PACKAGE_NAME: "@pareto-engineering/label-studio-editor"
+  # The NX build is known to work on Node 18 (see frontend-build.yml).
+  BUILD_NODE: "18"
+  # Trusted/staged publishing needs a recent npm (>= 11.15.0 for staging), which
+  # needs a newer Node than the build, so publish runs on its own Node/npm pins.
+  PUBLISH_NODE: "22.14.0"
+  NPM_VERSION: "11.18.0"
+
+# Publishing is authenticated with a short-lived OIDC token that GitHub mints for
+# this workflow and npm verifies against the package's Trusted Publisher config.
+# No NPM_TOKEN is used, or needed.
+#
+# Default mode is "stage": CI submits the build to npm's staging area and a
+# maintainer approves it with 2FA before it goes live. Running "stage" on a PR
+# exercises the full OIDC auth path without releasing anything.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: editor-publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: "Publish editor"
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # actions/checkout@v4.3.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Resolve version
+        working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./libs/editor/package.json').version")
+          tpl=$(node -p "require('./libs/editor/package.template.json').version")
+          if [ "$pkg" != "$tpl" ]; then
+            echo "::error::version mismatch — package.json is $pkg but package.template.json is $tpl. Both must be bumped together; package.template.json is the manifest that gets published."
+            exit 1
+          fi
+          echo "VERSION=$tpl" >> "$GITHUB_ENV"
+          echo "Version to publish: $tpl"
+
+      - name: Check version is not already published
+        run: |
+          set -euo pipefail
+          if npm view "${PACKAGE_NAME}" versions --json | grep -q "\"${VERSION}\""; then
+            echo "::error::${PACKAGE_NAME}@${VERSION} is already on npm. Bump the version in web/libs/editor/package.json and package.template.json."
+            exit 1
+          fi
+
+      - name: Setup frontend environment
+        uses: ./.github/actions/setup-frontend-environment
+        with:
+          node-version: "${{ env.BUILD_NODE }}"
+          directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+
+      - name: Build editor package
+        working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+        run: yarn editor:build-npm
+
+      - name: Validate the built manifest
+        working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}/dist/libs/editor"
+        run: |
+          set -euo pipefail
+          node -e "
+            const pkg = require('./package.json');
+            const deps = Object.keys(pkg.dependencies || {}).length;
+            // editor:build-npm copies package.template.json over the manifest NX generates.
+            // If that copy did not happen we would ship the NX one, which carries the full
+            // dependency tree and no 'module' field — an unusable package.
+            if (deps > 0) {
+              console.error('::error::built manifest has ' + deps + ' dependencies — package.template.json was not applied');
+              process.exit(1);
+            }
+            if (!pkg.module) {
+              console.error('::error::built manifest has no module field — package.template.json was not applied');
+              process.exit(1);
+            }
+            console.log('manifest ok:', pkg.name + '@' + pkg.version);
+          "
+
+      - name: Setup Node for publishing
+        # actions/setup-node@v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "${{ env.PUBLISH_NODE }}"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install pinned npm version
+        run: |
+          npm install --global "npm@${NPM_VERSION}"
+          test "$(node --version)" = "v${PUBLISH_NODE}"
+          test "$(npm --version)" = "${NPM_VERSION}"
+
+      - name: Publish
+        working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}/dist/libs/editor"
+        run: |
+          set -euo pipefail
+          case "${{ inputs.mode }}" in
+            dry-run)
+              npm publish --access public --dry-run
+              ;;
+            stage)
+              # Full OIDC auth; lands in staging and awaits maintainer 2FA approval
+              # (npm stage approve <id>, or npmjs.com). access comes from publishConfig.
+              npm stage publish
+              ;;
+            publish)
+              npm publish --access public
+              ;;
+            *)
+              echo "::error::unknown mode: ${{ inputs.mode }}"
+              exit 1
+              ;;
+          esac
