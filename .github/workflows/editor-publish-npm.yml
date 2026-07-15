@@ -73,11 +73,22 @@ jobs:
             exit 1
           fi
 
-      - name: Setup frontend environment
-        uses: ./.github/actions/setup-frontend-environment
+      # Inlined instead of using ./.github/actions/setup-frontend-environment:
+      # that shared action references actions/setup-node and actions/cache by
+      # tag, which the org policy (all actions must be pinned to a full SHA)
+      # rejects. Mirrors what the shared action does (yarn 1.22 + frozen install).
+      - name: Setup Node for build
+        # actions/setup-node@v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "${{ env.BUILD_NODE }}"
-          directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+
+      - name: Install dependencies
+        working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+        run: |
+          set -euo pipefail
+          npm install --global yarn@1.22
+          yarn install --frozen-lockfile
 
       - name: Build editor package
         working-directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
