@@ -231,6 +231,7 @@ INSTALLED_APPS = [
     'ml_models',
     'ml_model_providers',
     'jwt_auth',
+    'llm_adapter',
 ]
 
 MIDDLEWARE = [

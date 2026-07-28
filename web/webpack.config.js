@@ -50,7 +50,8 @@ const BUILD = {
 const plugins = [
   new MiniCssExtractPlugin(),
   new DefinePlugin({
-    "process.env.CSS_PREFIX": JSON.stringify(css_prefix)
+    "process.env.CSS_PREFIX": JSON.stringify(css_prefix),
+    "process.env.EDITOR_BUILD_DATE": JSON.stringify(new Date().toISOString())
   }),
   new EnvironmentPlugin(LOCAL_ENV)
 ];
@@ -286,9 +287,26 @@ module.exports = composePlugins(
       }
     }
 
+    // Playground entrypoint
+    if (process.env.NX_TASK_TARGET_PROJECT === "playground") {
+      config.entry = {
+        main: {
+          import: path.resolve(__dirname, "apps/playground/src/main.tsx")
+        }
+      };
+
+      config.output = {
+        ...config.output,
+        uniqueName: "playground",
+        publicPath: "auto",
+        scriptType: "text/javascript"
+      };
+    }
+
     // LS entrypoint
     if (
       process.env.NX_TASK_TARGET_PROJECT !== "editor" &&
+      process.env.NX_TASK_TARGET_PROJECT !== "playground" &&
       process.env.MODE !== "standalone"
     ) {
       config.entry = {
@@ -485,8 +503,14 @@ module.exports = composePlugins(
       plugins,
       optimization: optimizer(),
       devServer:
-        process.env.MODE === "standalone"
-          ? {}
+        process.env.MODE === "standalone" ||
+        process.env.NX_TASK_TARGET_PROJECT === "playground"
+          ? {
+              port: process.env.NX_TASK_TARGET_PROJECT === "playground" ? 3001 : 3000,
+              hot: true,
+              historyApiFallback: true,
+              allowedHosts: "all"
+            }
           : {
               // Port for the Webpack dev server
               port: HMR_PORT,

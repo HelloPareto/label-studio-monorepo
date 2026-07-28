@@ -7,6 +7,8 @@ import { RatingModel } from "./Rating";
 import { ShortcutModel } from "./Shortcut";
 import { TaxonomyModel } from "./Taxonomy/Taxonomy";
 import { TextAreaModel } from "./TextArea/TextArea";
+import { LLMTextAreaModel } from "./LLMTextArea/LLMTextArea";
+import { FileUploadModel } from "./FileUpload/FileUpload";
 
 import { HyperTextLabelsModel } from "./HyperTextLabels";
 import { LabelsModel } from "./Labels/Labels";
@@ -40,6 +42,8 @@ export {
   ShortcutModel,
   TaxonomyModel,
   TextAreaModel,
+  LLMTextAreaModel,
+  FileUploadModel,
   HyperTextLabelsModel,
   LabelsModel,
   ParagraphLabelsModel,
