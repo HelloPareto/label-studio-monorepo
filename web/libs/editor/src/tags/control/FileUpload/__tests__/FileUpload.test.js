@@ -370,14 +370,27 @@ describe("FileUpload Model", () => {
   });
 
   describe("removeFile", () => {
-    it("removes an uploaded entry and updates the result", () => {
+    it("removes an uploaded entry, deletes it on the backend, and updates the result", async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce(mockResponse({ json: { id: "abc" } }));
+
       model.updateFromResult([{ file_id: "abc", original_name: "doc.pdf" }]);
       const id = model.files[0].id;
 
       model.removeFile(id);
+      await Promise.resolve();
 
       expect(model.files.length).toBe(0);
       expect(model.updateResult).toHaveBeenCalled();
+
+      // regression test: removing an already-confirmed upload must call
+      // delete-upload, or the S3 object is orphaned forever (abort only
+      // cancels in-progress multipart uploads, it has nothing to cancel here)
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const [url, opts] = global.fetch.mock.calls[0];
+
+      expect(url).toBe("http://backend.test/api/v1/active-assignments/42/attachments/delete-upload/");
+      expect(opts.method).toBe("DELETE");
+      expect(JSON.parse(opts.body)).toEqual({ id: "abc" });
     });
   });
 

@@ -242,6 +242,23 @@ const Model = types
       }
     },
 
+    // Best-effort: deletes an already-confirmed upload's File row (and its S3
+    // object, per the backend's delete-upload contract). Needed because abort
+    // only cancels in-progress multipart uploads — without this, removing a
+    // completed upload orphans its S3 object forever.
+    async deleteRemote(cfg, fileId) {
+      if (!fileId) return;
+      try {
+        await fetch(`${attachmentsBase(cfg)}/delete-upload/`, {
+          method: "DELETE",
+          headers: authHeaders(cfg),
+          body: JSON.stringify({ id: fileId }),
+        });
+      } catch (e) {
+        // ignore - best effort cleanup
+      }
+    },
+
     removeFile(id) {
       const entry = self.files.find((f) => f.id === id);
 
@@ -260,6 +277,14 @@ const Model = types
           self.abortRemote(cfg, entry.fileId, entry.uploadId);
         } catch (e) {
           // no runtime config available; nothing to abort remotely
+        }
+      } else if (entry.status === "uploaded" && entry.fileId) {
+        try {
+          const cfg = getUploadConfig();
+
+          self.deleteRemote(cfg, entry.fileId);
+        } catch (e) {
+          // no runtime config available; nothing to delete remotely
         }
       }
 
