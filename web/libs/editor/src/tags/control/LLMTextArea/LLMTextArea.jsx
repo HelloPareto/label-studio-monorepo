@@ -20,10 +20,55 @@ const { TextArea } = Input;
 const { Text } = Typography;
 
 /**
+ * Reads the runtime request configuration. Deliberately NOT read from XML
+ * attributes: the LLM proxy host/auth token/assignment id are per-deployment
+ * and must never be hard-coded into (or exfiltrated via) per-batch Forte XML.
+ * Reuses `window.ForteUpload` set by the host app — see `FileUpload.jsx` for
+ * the full shape; it isn't upload-specific, just the one runtime config both
+ * tags share.
+ *
+ * Host application must set this before the annotation view mounts:
+ *
+ * ```js
+ * window.ForteUpload = {
+ *   baseUrl: "https://forte-backend.example.com",
+ *   token: "<knox-token>", // raw token preferred; a "Token "-prefixed value is also accepted
+ *   assignmentId: "123",
+ * };
+ * ```
+ */
+function getRuntimeConfig() {
+  const cfg = typeof window !== "undefined" ? window.ForteUpload : undefined;
+
+  if (!cfg || !cfg.baseUrl || !cfg.token || !cfg.assignmentId) {
+    throw new Error(
+      "LLMTextArea: window.ForteUpload = {baseUrl, token, assignmentId} must be configured before use",
+    );
+  }
+  return cfg;
+}
+
+function generateEndpoint(cfg) {
+  return `${cfg.baseUrl}/api/v1/active-assignments/${cfg.assignmentId}/llm/generate/`;
+}
+
+function authHeaders(cfg) {
+  const token = cfg.token.startsWith("Token ") ? cfg.token : `Token ${cfg.token}`;
+  return {
+    "Content-Type": "application/json",
+    Authorization: token,
+  };
+}
+
+/**
  * The `LLMTextArea` tag displays a text area that generates LLM responses on submit.
  * Use for tasks requiring LLM-assisted annotation, response generation, or interactive prompting.
  *
  * Use with the following data types: text, image, audio, video, HTML.
+ *
+ * Calls are made to `{baseUrl}/api/v1/active-assignments/{assignmentId}/llm/generate/`,
+ * host/auth/assignment injected at runtime via `window.ForteUpload` — never via XML
+ * attributes, see `getRuntimeConfig` in this file's source.
  *
  * @example
  * <!--Basic configuration for LLM response generation -->
@@ -33,7 +78,6 @@ const { Text } = Typography;
  *     name="llm_gen"
  *     toName="text"
  *     promptTemplate="Summarize: {{input}}"
- *     endpoint="/api/proxy/llm/generate"
  *   />
  * </View>
  *
@@ -44,7 +88,6 @@ const { Text } = Typography;
  *     name="llm_responses"
  *     promptTemplate="$config.prompt"
  *     numResponses="3"
- *     endpoint="/api/llm"
  *   />
  *   <Choices name="best" toName="llm_responses" choice="single">
  *     <Choice value="Response 1"/>
@@ -59,7 +102,6 @@ const { Text } = Typography;
  * @param {string} name                     - Name of the element
  * @param {string} toName                   - Name of the element to connect to
  * @param {string} promptTemplate           - Prompt template with {{input}} placeholder or $task.field
- * @param {string} endpoint                 - Backend proxy endpoint for LLM calls
  * @param {number} [numResponses=1]         - Number of LLM responses to generate (1-5)
  * @param {number} [maxSubmissions=1]       - Maximum submissions allowed
  * @param {boolean} [editable=true]         - Allow editing input after submission
@@ -73,7 +115,6 @@ const { Text } = Typography;
 const TagAttrs = types.model({
   toname: types.string,
   prompttemplate: types.string,
-  endpoint: types.string,
   numresponses: types.optional(types.string, "1"),
   maxsubmissions: types.optional(types.string, "1"),
   editable: types.optional(types.boolean, true),
@@ -274,6 +315,15 @@ const Model = types
 
       self._isEditing = false;
 
+      let cfg;
+
+      try {
+        cfg = getRuntimeConfig();
+      } catch (e) {
+        self.submission.setError(e.message);
+        return;
+      }
+
       try {
         const requestBody = {
           prompt: finalPrompt,
@@ -282,11 +332,9 @@ const Model = types
           annotation_id: self.annotation?.id,
         };
 
-        const response = await fetch(self.endpoint, {
+        const response = await fetch(generateEndpoint(cfg), {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: authHeaders(cfg),
           body: JSON.stringify(requestBody),
         });
 

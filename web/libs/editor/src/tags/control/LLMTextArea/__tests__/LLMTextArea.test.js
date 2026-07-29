@@ -26,7 +26,6 @@ describe("LLMTextArea Model", () => {
       name: "test_llm",
       toname: "text",
       prompttemplate: "Summarize: {{input}}",
-      endpoint: "/api/llm",
       numresponses: "1",
       maxsubmissions: "1",
       editable: true,
@@ -40,6 +39,16 @@ describe("LLMTextArea Model", () => {
     // Mock methods that depend on annotation
     model.updateResult = jest.fn();
     model.isReadOnly = () => false;
+
+    global.window.ForteUpload = {
+      baseUrl: "http://backend.test",
+      token: "test-token",
+      assignmentId: "42",
+    };
+  });
+
+  afterEach(() => {
+    delete global.window.ForteUpload;
   });
 
   describe("Initial State", () => {
@@ -284,11 +293,12 @@ describe("LLMTextArea Model", () => {
       await model.generateResponse();
 
       expect(global.fetch).toHaveBeenCalledWith(
-        "/api/llm",
+        "http://backend.test/api/v1/active-assignments/42/llm/generate/",
         expect.objectContaining({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: "Token test-token",
           },
           body: expect.any(String),
         })
@@ -328,6 +338,17 @@ describe("LLMTextArea Model", () => {
 
       expect(model.submission.status).toBe("error");
       expect(model.submission.error).toBe("Network error");
+    });
+
+    it("errors out without window.ForteUpload and does not call fetch", async () => {
+      delete global.window.ForteUpload;
+      model._currentInput = "Test input";
+
+      await model.generateResponse();
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(model.submission.status).toBe("error");
+      expect(model.submission.error).toMatch(/ForteUpload/);
     });
 
     it("should handle single response format", async () => {
