@@ -5,6 +5,7 @@ import { types } from "mobx-state-tree";
 import { useMemo } from "react";
 
 import "katex/dist/katex.min.css";
+import "./LatexText.scss";
 
 import Registry from "../../core/Registry";
 import { AnnotationMixin } from "../../mixins/AnnotationMixin";
@@ -146,7 +147,7 @@ const HtxLatexText = inject("store")(
 
     return (
       <div
-        className="htx-latextext"
+        className="lsf-htx-latextext"
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: html }}
       />

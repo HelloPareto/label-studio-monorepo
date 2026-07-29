@@ -1,0 +1,9 @@
+.htx-markdown {
+  // The host app injects a generic `p { color: ... }` reset that isn't scoped
+  // away from this dangerouslySetInnerHTML content, and overrides the color
+  // that should otherwise cascade correctly from the editor's own theme
+  // (visible as washed-out gray text in dark mode). Force it back.
+  * {
+    color: inherit;
+  }
+}

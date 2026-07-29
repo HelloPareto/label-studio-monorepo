@@ -472,8 +472,8 @@ const HtxFileUpload = observer(({ item }) => {
   }, []);
 
   return (
-    <div className="file-upload" ref={item.elementRef}>
-      <div className="file-upload__label">{item.label}</div>
+    <div className="lsf-file-upload" ref={item.elementRef}>
+      <div className="lsf-file-upload__label">{item.label}</div>
 
       {!isReadOnly && item.canAddMore && (
         <Dragger
@@ -508,7 +508,7 @@ const HtxFileUpload = observer(({ item }) => {
                   : []
               }
             >
-              <div className="file-upload__item">
+              <div className="lsf-file-upload__item">
                 <Text ellipsis style={{ maxWidth: 240 }}>
                   {entry.name}
                 </Text>

@@ -20,7 +20,7 @@ export const Markdown = ({ text, allowHtml = false }: MarkdownProps) => {
 
   return (
     <div
-      className="htx-markdown"
+      className="lsf-htx-markdown"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: safeHtml }}
     />
