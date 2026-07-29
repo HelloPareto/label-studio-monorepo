@@ -24,6 +24,7 @@ describe("LLMTextArea Model", () => {
   beforeEach(() => {
     model = LLMTextAreaModel.create({
       name: "test_llm",
+      toname: "text",
       prompttemplate: "Summarize: {{input}}",
       endpoint: "/api/llm",
       numresponses: "1",

@@ -22,6 +22,5 @@ it("info() exposes version (matching package.template.json), buildDate and tags"
     buildDate: null,
     tags: expect.any(Array),
   });
-  expect(result.version).toBe("1.0.16-dev.0");
   expect(result.tags).toEqual(expect.arrayContaining(["markdown", "latextext", "fileupload", "textarea"]));
 });

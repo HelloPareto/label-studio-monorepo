@@ -226,14 +226,22 @@ const Model = types
 
     deleteSubmission() {
       if (self.submission) {
-        // Delete the result first before clearing the submission
-        if (self.result) {
-          self.result.area.deleteRegion();
+        // Delete the result first before clearing the submission. self.result
+        // (ClassificationBase) reads self.annotation, which throws rather
+        // than returning falsy if the model isn't attached to a real
+        // annotation tree yet — guard so cleanup still succeeds.
+        try {
+          if (self.result) {
+            self.result.area.deleteRegion();
+          }
+        } catch (e) {
+          // no attached annotation store; nothing to delete
         }
 
         self.submission = null;
         self._currentInput = "";
         self._isEditing = false;
+        self.updateResult();
       }
     },
 
