@@ -1,6 +1,8 @@
 import { observer } from "mobx-react";
 import { types } from "mobx-state-tree";
 
+import "./Markdown.scss";
+
 import { Markdown } from "../../components/Markdown/Markdown";
 import Registry from "../../core/Registry";
 import Tree from "../../core/Tree";

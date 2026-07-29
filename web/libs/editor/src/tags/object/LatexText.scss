@@ -1,0 +1,10 @@
+.htx-latextext {
+  // Same host-CSS-leak issue as Markdown.scss: a generic `p { color: ... }`
+  // reset overrides KaTeX's own rendered output color (visible as washed-out
+  // gray in dark mode). Force it back to inherit from the editor's theme.
+  color: inherit;
+
+  * {
+    color: inherit;
+  }
+}
