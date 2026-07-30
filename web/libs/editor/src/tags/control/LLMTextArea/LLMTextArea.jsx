@@ -20,19 +20,14 @@ const { TextArea } = Input;
 const { Text } = Typography;
 
 /**
- * Reads the runtime request configuration. Deliberately NOT read from XML
- * attributes: the LLM proxy host/auth token/assignment id are per-deployment
- * and must never be hard-coded into (or exfiltrated via) per-batch Forte XML.
- * Reuses `window.ForteUpload` set by the host app — see `FileUpload.jsx` for
- * the full shape; it isn't upload-specific, just the one runtime config both
- * tags share.
- *
- * Host application must set this before the annotation view mounts:
+ * Reads runtime request config from `window.ForteUpload` (set by the host
+ * app; shared with `FileUpload.jsx`). Never read from XML attributes, since
+ * host/auth/assignment info must not be baked into per-batch Forte XML.
  *
  * ```js
  * window.ForteUpload = {
  *   baseUrl: "https://forte-backend.example.com",
- *   token: "<knox-token>", // raw token preferred; a "Token "-prefixed value is also accepted
+ *   token: "<knox-token>", // "Token "-prefixed value also accepted
  *   assignmentId: "123",
  * };
  * ```
@@ -66,9 +61,8 @@ function authHeaders(cfg) {
  *
  * Use with the following data types: text, image, audio, video, HTML.
  *
- * Calls are made to `{baseUrl}/api/v1/active-assignments/{assignmentId}/llm/generate/`,
- * host/auth/assignment injected at runtime via `window.ForteUpload` — never via XML
- * attributes, see `getRuntimeConfig` in this file's source.
+ * Endpoint and auth come from `window.ForteUpload` at runtime, never XML attributes
+ * (see `getRuntimeConfig`).
  *
  * @example
  * <!--Basic configuration for LLM response generation -->
@@ -267,10 +261,7 @@ const Model = types
 
     deleteSubmission() {
       if (self.submission) {
-        // Delete the result first before clearing the submission. self.result
-        // (ClassificationBase) reads self.annotation, which throws rather
-        // than returning falsy if the model isn't attached to a real
-        // annotation tree yet — guard so cleanup still succeeds.
+        // self.result can throw if not attached to a real annotation tree yet.
         try {
           if (self.result) {
             self.result.area.deleteRegion();
