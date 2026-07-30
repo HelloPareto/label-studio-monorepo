@@ -20,6 +20,17 @@ const { Dragger } = Upload;
 
 const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB, matches S3 multipart minimum part size
 
+// Converts `ETag`→`e_tag`, `PartNo`→`_part_no`.
+function confirmPart(eTag, partNo) {
+  return {
+    status: "fulfilled",
+    value: {
+      value: { ETag: eTag },
+      PartNo: partNo,
+    },
+  };
+}
+
 /**
  * Reads the runtime upload configuration. Deliberately NOT read from XML
  * attributes: the upload host/auth token/assignment id are per-deployment,
@@ -424,7 +435,7 @@ const Model = types
             throw new Error(`Part ${i + 1} upload did not return an ETag`);
           }
 
-          parts.push({ value: { eTag }, partNo: i + 1 });
+          parts.push(confirmPart(eTag, i + 1));
           entry.setProgress(Math.round(((i + 1) / presignedUrls.length) * 100));
         } catch (e) {
           failure = e;

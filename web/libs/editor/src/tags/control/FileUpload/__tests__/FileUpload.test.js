@@ -157,7 +157,12 @@ describe("FileUpload Model", () => {
       expect(confirmBody).toEqual({
         id: "generated-abc123",
         uploadId: "upload-xyz",
-        parts: [{ value: { eTag: '"etag-1"' }, partNo: 1 }],
+        parts: [
+          {
+            status: "fulfilled",
+            value: { value: { ETag: '"etag-1"' }, PartNo: 1 },
+          },
+        ],
       });
 
       expect(model.files[0].status).toBe("uploaded");
@@ -203,8 +208,8 @@ describe("FileUpload Model", () => {
       const confirmBody = JSON.parse(global.fetch.mock.calls[3][1].body);
 
       expect(confirmBody.parts).toEqual([
-        { value: { eTag: '"etag-1"' }, partNo: 1 },
-        { value: { eTag: '"etag-2"' }, partNo: 2 },
+        { status: "fulfilled", value: { value: { ETag: '"etag-1"' }, PartNo: 1 } },
+        { status: "fulfilled", value: { value: { ETag: '"etag-2"' }, PartNo: 2 } },
       ]);
       expect(model.files[0].status).toBe("uploaded");
     });
