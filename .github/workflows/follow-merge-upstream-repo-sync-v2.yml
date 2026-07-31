@@ -24,7 +24,7 @@ jobs:
     outputs:
       label-studio-sdk: "${{ fromJSON(steps.upstream-prs.outputs.shas).label-studio-sdk }}"
     steps:
-      - uses: hmarr/debug-action@v3.0.0
+      - uses: hmarr/debug-action@cd1afbd7852b7ad7b1b7a9a1b03efebd3b0a1820 # v3.0.0
 
       - name: Add Workflow link to chat ops command comment
         if: github.event.client_payload.github.payload.comment.id && github.event.client_payload.github.payload.repository.full_name
