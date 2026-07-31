@@ -37,11 +37,11 @@ jobs:
 
       - name: Checkout
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.ref }}
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: changes
         with:
           filters: |
@@ -70,7 +70,7 @@ jobs:
               - '.github/workflows/cicd_pipeline.yml'
               - '.github/workflows/docker-build.yml'
 
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         id: commit-details
         with:
           script: |
@@ -197,7 +197,7 @@ jobs:
     needs:
       - build-docker
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           DOCKER_IMAGE_VERSION: ${{ needs.build-docker.outputs.build_version }}
           RELEASE_NAME: ${{ startsWith(github.ref_name, 'ls-release/') && 'ls-release' || 'ls-develop' }}
@@ -263,21 +263,21 @@ jobs:
       - uses: hmarr/debug-action@cd1afbd7852b7ad7b1b7a9a1b03efebd3b0a1820 # v3.0.0
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           token: ${{ secrets.GIT_PAT }}
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Checkout Actions Hub
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           token: ${{ secrets.GIT_PAT }}
           repository: HumanSignal/actions-hub
           path: ./.github/actions-hub
 
       - name: Create release draft
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         id: create-draft-release
         env:
           TARGET_COMMITISH: "${{ github.ref_name }}"
@@ -436,7 +436,7 @@ jobs:
           helm_chart_path: "heartex/label-studio/Chart.yaml"
 
       - name: Update Draft Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         id: update-draft-release
         with:
           github-token: ${{ secrets.GIT_PAT }}
@@ -524,7 +524,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Decide whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@release/v1
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
         with:
           allowed-skips: gitleaks, bandit, ruff, blue, biome, stylelint, pytest, migrations, conda-test, build-docker, tests-yarn-unit, tests-yarn-integration, tests-yarn-e2e
           jobs: ${{ toJSON(needs) }}
