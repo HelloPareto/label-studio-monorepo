@@ -1,18 +1,31 @@
 # LLMTextArea Tag
 
-A Label Studio tag that enables LLM-assisted annotation by generating responses based on user input.
+A Label Studio control tag that lets annotators generate LLM responses to a prompt built from task data and user input.
 
-## Features
+## How auth and config work
 
-- ✅ Single submission with edit/delete capabilities
-- ✅ Generate multiple responses in one call (1-5 responses)
-- ✅ Template-based prompt construction with placeholders
-- ✅ Loading, success, and error states with retry functionality
-- ✅ Stores both user input and LLM responses separately
-- ✅ Backend proxy pattern (no API keys exposed to frontend)
-- ✅ Per-region support
+The tag never reads auth details from XML — that would bake secrets into per-batch Forte config. Instead, the host application (`front/LabelStudioFrontend`) sets a runtime bag on `window` before constructing the Label Studio instance:
 
-## Basic Usage
+```js
+window.ForteRuntime = {
+  baseUrl: "https://forte-backend.example.com",
+  token: "<knox-token>",   // copied from the Authorization cookie by the host
+  assignmentId: "123",
+};
+```
+
+Every generate call posts to Forte's active-assignment LLM endpoint:
+
+```
+POST {baseUrl}/api/v1/active-assignments/{assignmentId}/llm/generate/
+Authorization: Token <token>
+```
+
+The Knox token comes from the session cookie the same way all other Forte API calls work (`getCookie('Authorization')`). The tag forwards it as an `Authorization` header because that is what production `backend-ai` requires — session/cookie auth is not available on `ActiveAssignmentViewSet` in production.
+
+**Note:** Label Studio ships a local echo endpoint at `/api/llm/echo/` (in `llm_adapter/`). That is only for LS-internal development and testing; it is **not** what this tag calls in Forte embeds.
+
+## Basic usage
 
 ```xml
 <View>
@@ -21,7 +34,6 @@ A Label Studio tag that enables LLM-assisted annotation by generating responses 
     name="summary"
     toName="article"
     promptTemplate="Summarize the following text:\n\n{{input}}"
-    endpoint="/api/proxy/llm/generate"
   />
 </View>
 ```
@@ -31,254 +43,81 @@ A Label Studio tag that enables LLM-assisted annotation by generating responses 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | string | required | Unique identifier for the tag |
-| `toName` | string | required | Name of the object tag to connect to |
-| `promptTemplate` | string | required | Template for building prompts. Supports `{{input}}` and `$task.field` |
-| `endpoint` | string | required | Backend proxy endpoint for LLM API calls |
-| `numResponses` | number | 1 | Number of responses to generate (1-5) |
-| `maxSubmissions` | number | 1 | Maximum number of submissions allowed |
-| `editable` | boolean | true | Allow editing and regenerating |
-| `rows` | number | 3 | Number of rows in the textarea |
+| `toName` | string | — | Name of the object tag to connect to (optional) |
+| `promptTemplate` | string | required | Template for the prompt. Supports `{{input}}` and task-data field references via `{{fieldName}}` or `$field` |
+| `numResponses` | number | 1 | Number of LLM responses to generate (1–5) |
+| `maxSubmissions` | number | 1 | Maximum number of times the user can generate (≥ 2 allows re-generation) |
+| `editable` | boolean | true | Show Edit button after submission |
+| `rows` | number | 3 | Rows in the input textarea |
 | `placeholder` | string | "Enter your input..." | Placeholder text |
-| `label` | string | "Your Input" | Label displayed above input |
-| `required` | boolean | false | Whether input is required |
-| `requiredMessage` | string | - | Custom validation message |
+| `label` | string | "Your Input" | Label shown above the input |
+| `required` | boolean | false | Whether input is required for submission |
+| `requiredMessage` | string | — | Custom validation message |
 
-## Prompt Templates
+## Prompt templates
 
-### Using {{input}} placeholder
+### `{{input}}` placeholder
 
-```xml
-<LLMTextArea
-  name="llm"
-  promptTemplate="Question: {{input}}\n\nAnswer:"
-  endpoint="/api/llm"
-/>
-```
-
-### Using task data
+Replaced with whatever the annotator typed in the text area:
 
 ```xml
 <LLMTextArea
-  name="llm"
-  promptTemplate="Document: {{text}}\n\nSummarize: {{input}}"
-  endpoint="/api/llm"
+  name="summary"
+  promptTemplate="Summarize: {{input}}"
 />
 ```
 
-### Using $config references
+### Task data fields
+
+Fields from the task's data object can be embedded alongside user input:
 
 ```xml
 <LLMTextArea
-  name="llm"
-  promptTemplate="$config.system_prompt"
-  endpoint="/api/llm"
+  name="qa"
+  promptTemplate="Context: {{article}}\n\nQuestion: {{input}}"
 />
 ```
 
-With task data:
-```json
-{
-  "text": "Article content...",
-  "config": {
-    "system_prompt": "You are a helpful assistant. {{input}}"
-  }
-}
+Or resolved from a task-data field at the top level (value is the full template string):
+
+```xml
+<LLMTextArea
+  name="prompt_runner"
+  promptTemplate="$prompt_config"
+/>
 ```
 
-## Multiple Responses for Ranking
+## Multiple responses
 
 ```xml
 <View>
   <LLMTextArea
-    name="responses"
-    promptTemplate="Generate a summary: {{input}}"
+    name="candidates"
+    promptTemplate="Write a subject line for: {{input}}"
     numResponses="3"
-    endpoint="/api/llm"
+    maxSubmissions="2"
   />
-
-  <Choices name="best_response" toName="responses" choice="single">
-    <Choice value="Response 1 is best"/>
-    <Choice value="Response 2 is best"/>
-    <Choice value="Response 3 is best"/>
-  </Choices>
-
-  <Rating name="quality" toName="responses" maxRating="5"/>
 </View>
 ```
 
-## Backend API Contract
+## Result structure
 
-### Request Format
-
-The frontend sends:
+Results are stored as:
 
 ```json
 {
-  "prompt": "Summarize: Lorem ipsum dolor sit amet...",
-  "num_responses": 1,
-  "task_id": "123",
-  "annotation_id": "456"
-}
-```
-
-### Response Format
-
-The backend should return:
-
-```json
-{
-  "responses": [
-    {
-      "text": "This is the generated response...",
-      "metadata": {
-        "model": "gpt-4",
-        "tokens": 150
-      }
-    }
-  ]
-}
-```
-
-Or for a single response (also supported):
-
-```json
-{
-  "response": "This is the generated response...",
-  "model": "gpt-4",
-  "tokens": 150
-}
-```
-
-### Error Response
-
-```json
-{
-  "error": "Rate limit exceeded"
-}
-```
-
-## Backend Implementation Example
-
-### Django (Python)
-
-```python
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-import requests
-import os
-
-@require_http_methods(["POST"])
-def proxy_llm_generate(request):
-    """Proxy LLM generation requests to protect API keys"""
-    try:
-        data = json.loads(request.body)
-
-        prompt = data.get('prompt')
-        num_responses = data.get('num_responses', 1)
-
-        # Call your LLM API with authentication
-        llm_response = requests.post(
-            os.getenv('LLM_API_URL'),
-            headers={
-                'Authorization': f'Bearer {os.getenv("LLM_API_KEY")}',
-                'Content-Type': 'application/json'
-            },
-            json={
-                'prompt': prompt,
-                'n': num_responses,
-                'temperature': 0.7,
-                'max_tokens': 500,
-            },
-            timeout=60
-        )
-
-        if not llm_response.ok:
-            return JsonResponse({
-                'error': f'LLM API error: {llm_response.status_code}'
-            }, status=500)
-
-        llm_data = llm_response.json()
-
-        # Format response
-        responses = []
-        for choice in llm_data.get('choices', []):
-            responses.append({
-                'text': choice.get('text') or choice.get('message', {}).get('content'),
-                'metadata': {
-                    'model': llm_data.get('model'),
-                    'tokens': choice.get('usage', {}).get('total_tokens'),
-                }
-            })
-
-        return JsonResponse({'responses': responses})
-
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-```
-
-### Express (Node.js)
-
-```javascript
-app.post('/api/proxy/llm/generate', async (req, res) => {
-  try {
-    const { prompt, num_responses = 1, task_id, annotation_id } = req.body;
-
-    const response = await fetch(process.env.LLM_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.LLM_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        prompt,
-        n: num_responses,
-        temperature: 0.7,
-        max_tokens: 500,
-      }),
-    });
-
-    if (!response.ok) {
-      return res.status(500).json({
-        error: `LLM API error: ${response.status}`
-      });
-    }
-
-    const data = await response.json();
-
-    const responses = data.choices.map(choice => ({
-      text: choice.text || choice.message?.content,
-      metadata: {
-        model: data.model,
-        tokens: choice.usage?.total_tokens,
-      },
-    }));
-
-    res.json({ responses });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-```
-
-## Result Structure
-
-The tag stores results in this format:
-
-```json
-{
-  "from_name": "llm_annotation",
-  "to_name": "text",
+  "from_name": "summary",
+  "to_name": "article",
   "type": "llmtextarea",
   "value": {
-    "user_input": "What is this article about?",
-    "prompt": "Article: Lorem ipsum...\n\nQuestion: What is this article about?",
+    "user_input": "The article text the annotator typed",
+    "prompt": "Full resolved prompt sent to the backend",
     "responses": [
       {
-        "text": "This article discusses...",
+        "text": "Generated response text",
         "metadata": {
-          "model": "gpt-4",
-          "tokens": 150
+          "model": "gemini-2.5-flash",
+          "response_number": 1
         }
       }
     ],
@@ -287,95 +126,25 @@ The tag stores results in this format:
 }
 ```
 
-## Advanced Examples
+## Backend contract
 
-### Translation Task
+Forte's `LLMGenerationMixin` handles the generate endpoint. Expected request body:
 
-```xml
-<View>
-  <Text name="source" value="$source_text"/>
-  <LLMTextArea
-    name="translation"
-    promptTemplate="Translate to {{target_lang}}:\n\n{{input}}"
-    endpoint="/api/translate"
-    label="Text to translate"
-  />
-  <TextArea name="review" toName="translation" label="Review translation"/>
-</View>
+```json
+{
+  "prompt": "string",
+  "num_responses": 1
+}
 ```
 
-### Question Answering
+Expected response body:
 
-```xml
-<View>
-  <Text name="document" value="$document"/>
-  <LLMTextArea
-    name="qa"
-    toName="document"
-    promptTemplate="Document: {{text}}\n\nQuestion: {{input}}\n\nAnswer:"
-    endpoint="/api/qa"
-    label="Ask a question"
-  />
-</View>
+```json
+{
+  "responses": [
+    { "text": "string", "metadata": { "model": "string", "response_number": 1 } }
+  ]
+}
 ```
 
-### Content Generation with Evaluation
-
-```xml
-<View>
-  <LLMTextArea
-    name="generation"
-    promptTemplate="$config.generation_prompt"
-    numResponses="3"
-    endpoint="/api/generate"
-  />
-
-  <Choices name="best" toName="generation">
-    <Choice value="Response 1"/>
-    <Choice value="Response 2"/>
-    <Choice value="Response 3"/>
-  </Choices>
-
-  <Taxonomy name="issues" toName="generation">
-    <Choice value="Accuracy">
-      <Choice value="Factual Error"/>
-      <Choice value="Incomplete"/>
-    </Choice>
-    <Choice value="Style">
-      <Choice value="Too Formal"/>
-      <Choice value="Too Casual"/>
-    </Choice>
-  </Taxonomy>
-</View>
-```
-
-## UI Features
-
-### States
-
-1. **Input Mode** - User enters text
-2. **Loading** - Spinning indicator while generating
-3. **Success** - Shows user input and LLM response(s)
-4. **Error** - Shows error message with retry button
-
-### Actions
-
-- **Generate** - Submit input and call LLM
-- **Edit** - Modify input and regenerate
-- **Delete** - Remove submission and start over
-- **Retry** - Retry after an error
-
-## Testing
-
-Run tests:
-```bash
-npm test -- LLMTextArea.test.js
-```
-
-## Notes
-
-- The tag automatically includes task_id and annotation_id in requests
-- API keys should never be exposed to the frontend - always use a backend proxy
-- The tag supports Label Studio's perRegion mode
-- Multiple responses are useful for ranking/comparison tasks
-- All responses are saved together with the original prompt
+A single-response format (`{ "response": "...", "model": "..." }`) is also accepted by the tag for backward compatibility.

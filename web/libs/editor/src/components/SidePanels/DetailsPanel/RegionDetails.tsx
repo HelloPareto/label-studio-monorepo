@@ -47,12 +47,17 @@ export const ResultItem: FC<{ result: any }> = observer(({ result }) => {
         </Elem>
       );
     }
-    if (type === "textarea") {
+    if (type === "textarea" || type === "llmtextarea") {
+      const displayValue =
+        type === "llmtextarea"
+          ? [mainValue?.user_input ?? ""]
+          : mainValue;
+
       return (
         <Elem name="result">
           <Text>Text: </Text>
           <Elem name="value">
-            <TextResult mainValue={mainValue} />
+            <TextResult mainValue={displayValue} />
           </Elem>
         </Elem>
       );

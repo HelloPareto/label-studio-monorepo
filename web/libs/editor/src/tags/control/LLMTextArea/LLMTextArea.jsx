@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import { observer } from "mobx-react";
-import { types } from "mobx-state-tree";
+import { types, flow, isAlive } from "mobx-state-tree";
 import { Button, Input, Spin, Alert, Card, Typography, Space } from "antd";
 import { ReloadOutlined, EditOutlined, DeleteOutlined, CheckOutlined } from "@ant-design/icons";
 
@@ -13,46 +14,15 @@ import { ReadOnlyControlMixin } from "../../../mixins/ReadOnlyMixin";
 import ControlBase from "../Base";
 import ClassificationBase from "../ClassificationBase";
 import { parseValue } from "../../../utils/data";
+import { getForteRuntime, forteAuthHeaders } from "../../../utils/forteRuntime";
 
 import "./LLMTextArea.scss";
 
 const { TextArea } = Input;
 const { Text } = Typography;
 
-/**
- * Reads runtime request config from `window.ForteUpload` (set by the host
- * app; shared with `FileUpload.jsx`). Never read from XML attributes, since
- * host/auth/assignment info must not be baked into per-batch Forte XML.
- *
- * ```js
- * window.ForteUpload = {
- *   baseUrl: "https://forte-backend.example.com",
- *   token: "<knox-token>", // "Token "-prefixed value also accepted
- *   assignmentId: "123",
- * };
- * ```
- */
-function getRuntimeConfig() {
-  const cfg = typeof window !== "undefined" ? window.ForteUpload : undefined;
-
-  if (!cfg || !cfg.baseUrl || !cfg.token || !cfg.assignmentId) {
-    throw new Error(
-      "LLMTextArea: window.ForteUpload = {baseUrl, token, assignmentId} must be configured before use",
-    );
-  }
-  return cfg;
-}
-
 function generateEndpoint(cfg) {
   return `${cfg.baseUrl}/api/v1/active-assignments/${cfg.assignmentId}/llm/generate/`;
-}
-
-function authHeaders(cfg) {
-  const token = cfg.token.startsWith("Token ") ? cfg.token : `Token ${cfg.token}`;
-  return {
-    "Content-Type": "application/json",
-    Authorization: token,
-  };
 }
 
 /**
@@ -61,8 +31,8 @@ function authHeaders(cfg) {
  *
  * Use with the following data types: text, image, audio, video, HTML.
  *
- * Endpoint and auth come from `window.ForteUpload` at runtime, never XML attributes
- * (see `getRuntimeConfig`).
+ * Endpoint and auth come from `window.ForteRuntime` at runtime, never XML attributes
+ * (see `utils/forteRuntime.js`).
  *
  * @example
  * <!--Basic configuration for LLM response generation -->
@@ -107,7 +77,7 @@ function authHeaders(cfg) {
  */
 
 const TagAttrs = types.model({
-  toname: types.string,
+  toname: types.maybeNull(types.string),
   prompttemplate: types.string,
   numresponses: types.optional(types.string, "1"),
   maxsubmissions: types.optional(types.string, "1"),
@@ -174,7 +144,16 @@ const Model = types
 
     // Edit mode
     _isEditing: types.optional(types.boolean, false),
+
+    // Tracks how many times the user has successfully generated so
+    // canSubmit can enforce maxSubmissions correctly.
+    _generationCount: types.optional(types.number, 0),
   })
+  .volatile(() => ({
+    // AbortController for the in-flight generate fetch; allows
+    // deleteSubmission and unmount to cancel the request.
+    _generateController: null,
+  }))
   .views((self) => ({
     get holdsState() {
       return self.submission !== null;
@@ -185,8 +164,9 @@ const Model = types
     },
 
     get canSubmit() {
-      const max = Number.parseInt(self.maxsubmissions);
-      return !self.hasSubmitted || (self.editable && max > 1);
+      const max = Number.parseInt(self.maxsubmissions) || 1;
+      // Allow if never generated, or if editable and under the cap.
+      return self._generationCount === 0 || (self.editable && self._generationCount < max);
     },
 
     get isLoading() {
@@ -229,26 +209,30 @@ const Model = types
         template = '';
       }
 
-      // Replace {{input}} with user input
-      let prompt = template.replace(/\{\{input\}\}/g, userInput);
+      // Use replacer functions so JS special replacement patterns in the user's
+      // text ($& $$ $` $' $<n>) are treated as literal strings, not references.
+      let prompt = template.replace(/\{\{input\}\}/g, () => userInput);
 
-      // Replace {{text}} or other task data fields if needed
-      // This allows templates like "Summarize: {{text}}\n\nUser question: {{input}}"
+      // Replace {{fieldName}} with task data fields.
       const taskData = self.annotation?.store?.task?.dataObj ?? {};
       prompt = prompt.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-        return taskData[key] ?? match;
+        return key in taskData ? String(taskData[key]) : match;
       });
 
       return prompt;
     },
   }))
-  .actions((self) => ({
+  .actions((self) => {
+    // Capture validate from the mixin chain (RequiredMixin) before overriding.
+    const Super = { validate: self.validate };
+
+    return {
     setValue(value) {
       self._currentInput = value;
     },
 
     startEditing() {
-      if (self.submission && self.editable && !self.isReadOnly()) {
+      if (self.submission && self.editable && !self.isReadOnly() && self.canSubmit) {
         self._isEditing = true;
         self._currentInput = self.submission.userInput;
       }
@@ -259,8 +243,19 @@ const Model = types
       self._currentInput = "";
     },
 
+    // Abort any in-flight generate fetch (used on unmount and before delete).
+    abortGenerate() {
+      if (self._generateController) {
+        self._generateController.abort();
+        self._generateController = null;
+      }
+    },
+
     deleteSubmission() {
       if (self.submission) {
+        // Cancel any in-flight generate for this submission before nulling it.
+        self.abortGenerate();
+
         // self.result can throw if not attached to a real annotation tree yet.
         try {
           if (self.result) {
@@ -273,11 +268,12 @@ const Model = types
         self.submission = null;
         self._currentInput = "";
         self._isEditing = false;
+        self._generationCount = 0;
         self.updateResult();
       }
     },
 
-    async generateResponse() {
+    generateResponse: flow(function* generateResponse() {
       if (!self._currentInput.trim()) {
         InfoModal.warning("Please enter some text");
         return;
@@ -298,7 +294,6 @@ const Model = types
           timestamp: Date.now(),
         });
       } else {
-        // Editing: update values
         self.submission.updateInput(userInput, finalPrompt);
         self.submission.clearResponses();
         self.submission.setLoading();
@@ -309,11 +304,16 @@ const Model = types
       let cfg;
 
       try {
-        cfg = getRuntimeConfig();
+        cfg = getForteRuntime();
       } catch (e) {
-        self.submission.setError(e.message);
+        if (isAlive(self) && self.submission) self.submission.setError(e.message);
         return;
       }
+
+      // Create a fresh AbortController for this request.
+      self.abortGenerate();
+      const controller = new AbortController();
+      self._generateController = controller;
 
       try {
         const requestBody = {
@@ -323,25 +323,31 @@ const Model = types
           annotation_id: self.annotation?.id,
         };
 
-        const response = await fetch(generateEndpoint(cfg), {
+        const response = yield fetch(generateEndpoint(cfg), {
           method: 'POST',
-          headers: authHeaders(cfg),
+          headers: forteAuthHeaders(cfg),
           body: JSON.stringify(requestBody),
+          signal: controller.signal,
         });
 
+        // Guard: model may have been destroyed or submission deleted while awaiting.
+        if (!isAlive(self) || !self.submission) return;
+
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
+          const errorData = yield response.json().catch(() => ({}));
           throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const data = await response.json();
+        const data = yield response.json();
+
+        if (!isAlive(self) || !self.submission) return;
 
         if (data.error) {
           throw new Error(data.error);
         }
 
-        // Update submission with responses
         self.submission.setSuccess();
+        self._generationCount += 1;
 
         if (data.responses && Array.isArray(data.responses)) {
           data.responses.forEach(resp => {
@@ -351,7 +357,6 @@ const Model = types
             );
           });
         } else {
-          // Handle single response format
           const responseText = data.response || data.text || '';
           self.submission.addResponse(
             responseText,
@@ -359,14 +364,17 @@ const Model = types
           );
         }
 
-        // Update annotation result
         self.updateResult();
 
       } catch (error) {
-        console.error('LLM generation failed:', error);
+        if (!isAlive(self) || !self.submission) return;
         self.submission.setError(error.message);
+      } finally {
+        if (isAlive(self) && self._generateController === controller) {
+          self._generateController = null;
+        }
       }
-    },
+    }),
 
     needsUpdate() {
       if (self.result) {
@@ -381,7 +389,6 @@ const Model = types
         return;
       }
 
-      // Restore from saved annotation
       self.submission = LLMSubmission.create({
         id: guidGenerator(),
         userInput: value.user_input || "",
@@ -400,11 +407,22 @@ const Model = types
       InfoModal.warning(self.requiredmessage || `Input for "${self.name}" is required.`);
     },
 
-    beforeSend() {
-      // If user has input but hasn't generated, warn them
-      if (self._currentInput && !self.submission) {
-        InfoModal.warning("Please generate a response before submitting.");
+    validate() {
+      // Block submit while a generate is in flight.
+      if (self.isLoading) {
+        InfoModal.warning("Please wait for the LLM response to finish before submitting.");
+        return false;
       }
+      // Block submit if the user has typed input but hasn't generated yet.
+      if (self._currentInput.trim() && !self.submission) {
+        InfoModal.warning("Please generate a response before submitting.");
+        return false;
+      }
+      return Super.validate();
+    },
+
+    beforeSend() {
+      // validate() handles all blocking; nothing extra needed here.
     },
 
     getSelectedString() {
@@ -415,7 +433,8 @@ const Model = types
     unselectAll() {
       // Required by ControlBase
     },
-  }));
+    };
+  });
 
 const LLMTextAreaModel = types.compose(
   "LLMTextAreaModel",
@@ -435,12 +454,18 @@ const HtxLLMTextArea = observer(({ item }) => {
   const isEditing = item._isEditing || !item.hasSubmitted;
   const visibleStyle = item.perRegionVisible() ? {} : { display: "none" };
 
+  useEffect(() => {
+    return () => {
+      item.abortGenerate();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="llm-textarea" style={visibleStyle} ref={item.elementRef}>
-      {/* Input Section (shown when editing or no submission) */}
+    <div className="lsf-llm-textarea" style={visibleStyle} ref={item.elementRef}>
       {isEditing && (
-        <div className="llm-textarea__input">
-          <div className="llm-textarea__label">{item.label}</div>
+        <div className="lsf-llm-textarea__input">
+          <div className="lsf-llm-textarea__label">{item.label}</div>
           <TextArea
             value={item._currentInput}
             rows={Number.parseInt(item.rows)}
@@ -455,7 +480,7 @@ const HtxLLMTextArea = observer(({ item }) => {
               type="primary"
               onClick={() => item.generateResponse()}
               loading={item.isLoading}
-              disabled={!item._currentInput.trim() || isReadOnly}
+              disabled={!item._currentInput.trim() || isReadOnly || !item.canSubmit}
             >
               {item.isLoading ? 'Generating...' : 'Generate Response'}
             </Button>
@@ -469,22 +494,21 @@ const HtxLLMTextArea = observer(({ item }) => {
         </div>
       )}
 
-      {/* Submission Display */}
       {item.submission && !isEditing && (
-        <div className="llm-textarea__submission">
+        <div className="lsf-llm-textarea__submission">
           <Card
             size="small"
             title={
               <Space>
                 <span>Submission</span>
                 {item.submission.status === 'loading' && <Spin size="small" />}
-                {item.submission.status === 'success' && <CheckOutlined style={{ color: '#52c41a' }} />}
+                {item.submission.status === 'success' && <CheckOutlined />}
               </Space>
             }
             extra={
               !isReadOnly && (
                 <Space>
-                  {item.editable && item.submission.status !== 'loading' && (
+                  {item.editable && item.canSubmit && item.submission.status !== 'loading' && (
                     <Button
                       type="text"
                       size="small"
@@ -509,6 +533,7 @@ const HtxLLMTextArea = observer(({ item }) => {
                     danger
                     size="small"
                     icon={<DeleteOutlined />}
+                    disabled={item.isLoading}
                     onClick={() => {
                       if (window.confirm('Delete this submission?')) {
                         item.deleteSubmission();
@@ -521,32 +546,22 @@ const HtxLLMTextArea = observer(({ item }) => {
               )
             }
           >
-            {/* User Input */}
-            <div className="llm-textarea__user-input">
+            <div className="lsf-llm-textarea__user-input">
               <Text strong>Your Input:</Text>
-              <div style={{
-                padding: '8px',
-                background: '#f5f5f5',
-                borderRadius: '4px',
-                marginTop: '4px',
-                marginBottom: '12px',
-                whiteSpace: 'pre-wrap',
-              }}>
+              <div className="lsf-llm-textarea__user-input-text">
                 {item.submission.userInput}
               </div>
             </div>
 
-            {/* Loading State */}
             {item.submission.status === 'loading' && (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
+              <div className="lsf-llm-textarea__loading">
                 <Spin size="large" />
-                <div style={{ marginTop: '10px' }}>
+                <div>
                   <Text type="secondary">Generating {item.numResponsesInt} response{item.numResponsesInt > 1 ? 's' : ''}...</Text>
                 </div>
               </div>
             )}
 
-            {/* Error State */}
             {item.submission.status === 'error' && (
               <Alert
                 message="Generation Failed"
@@ -561,9 +576,8 @@ const HtxLLMTextArea = observer(({ item }) => {
               />
             )}
 
-            {/* Success - Show Responses */}
             {item.submission.status === 'success' && item.submission.responses.length > 0 && (
-              <div className="llm-textarea__responses">
+              <div className="lsf-llm-textarea__responses">
                 <Text strong>
                   {item.submission.responses.length > 1
                     ? `LLM Responses (${item.submission.responses.length}):`
@@ -572,27 +586,18 @@ const HtxLLMTextArea = observer(({ item }) => {
                 </Text>
 
                 {item.submission.responses.map((response, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '12px',
-                      background: '#fafafa',
-                      border: '1px solid #d9d9d9',
-                      borderRadius: '4px',
-                      marginTop: '8px',
-                    }}
-                  >
+                  <div key={idx} className="lsf-llm-textarea__response-item">
                     {item.submission.responses.length > 1 && (
                       <Text strong style={{ display: 'block', marginBottom: '8px' }}>
                         Response {idx + 1}:
                       </Text>
                     )}
-                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                    <div className="lsf-llm-textarea__response-text">
                       {response.text}
                     </div>
 
                     {response.metadata && (response.metadata.model || response.metadata.tokens) && (
-                      <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e8e8e8' }}>
+                      <div className="lsf-llm-textarea__response-meta">
                         <Text type="secondary" style={{ fontSize: '0.85em' }}>
                           {response.metadata.model && `Model: ${response.metadata.model}`}
                           {response.metadata.tokens && ` • Tokens: ${response.metadata.tokens}`}
@@ -602,7 +607,7 @@ const HtxLLMTextArea = observer(({ item }) => {
                   </div>
                 ))}
 
-                <div style={{ marginTop: '8px' }}>
+                <div className="lsf-llm-textarea__timestamp">
                   <Text type="secondary" style={{ fontSize: '0.85em' }}>
                     Generated {new Date(item.submission.timestamp).toLocaleString()}
                   </Text>

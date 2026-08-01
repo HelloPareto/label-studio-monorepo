@@ -89,8 +89,8 @@ class EchoAPIView(APIView):
             return Response({'responses': responses}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Error in LLM Echo endpoint: {str(e)}", exc_info=True)
+            logger.error("Error in LLM Echo endpoint: %s", str(e), exc_info=True)
             return Response(
-                {'error': f'Internal server error: {str(e)}'},
+                {'error': 'Internal server error'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

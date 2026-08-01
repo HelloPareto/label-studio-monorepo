@@ -84,6 +84,48 @@ describe("renderLatexMarkdown", () => {
   it("recovers gracefully from invalid LaTeX without throwing", () => {
     expect(() => renderLatexMarkdown("$\\invalidcmd{$")).not.toThrow();
   });
+
+  describe("currency and escaped dollar handling", () => {
+    it("does not treat plain currency ($5) as math", () => {
+      const html = renderLatexMarkdown("The price is $5 today");
+      // Should not render KaTeX for a plain number
+      expect(html).not.toContain('class="katex"');
+      expect(html).toContain("$5");
+    });
+
+    it("does not treat $5.00 as math", () => {
+      const html = renderLatexMarkdown("Total: $5.00");
+      expect(html).not.toContain('class="katex"');
+      expect(html).toContain("$5.00");
+    });
+
+    it("renders \\$ as a literal dollar sign without entering math mode", () => {
+      const html = renderLatexMarkdown("The cost is \\$10");
+      // No KaTeX rendering — just a literal $
+      expect(html).not.toContain('class="katex"');
+      expect(html).toContain("$10");
+    });
+
+    it("still renders real math like $x_1$ correctly", () => {
+      const html = renderLatexMarkdown("Solve $x_1 + x_2 = 0$");
+      expect(html).toContain('class="katex"');
+    });
+
+    it("handles currency and math on the same line without false math rendering", () => {
+      // With the pre-protection step, $5 is tokenised before the math regex
+      // runs, so the two dollar signs no longer form a `$...$` math span.
+      const html = renderLatexMarkdown("Price: $5 and equation $x^2$");
+      expect(html).toContain("$5");
+      expect(html).toContain('class="katex"');
+    });
+
+    it("does not treat two currency amounts on the same line as math", () => {
+      const html = renderLatexMarkdown("Items cost $5 and $10");
+      expect(html).not.toContain('class="katex"');
+      expect(html).toContain("$5");
+      expect(html).toContain("$10");
+    });
+  });
 });
 
 describe("LatexTextModel (MST wiring)", () => {

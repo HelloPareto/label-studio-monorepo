@@ -51,6 +51,7 @@ const Model = types.model({
     "list",
     "dialog",
     "textarea",
+    "llmtextarea",
     "markdown",
     "latextext",
     "fileupload",

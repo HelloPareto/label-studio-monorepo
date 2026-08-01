@@ -1,14 +1,11 @@
-import { marked } from "marked";
 import { sanitizeHtml } from "../../utils/html";
+import { marked } from "../../utils/markedInit";
 import { escapeHtml } from "../../utils/utilities";
 
 interface MarkdownProps {
   text: string;
   allowHtml?: boolean;
 }
-
-// marked@4 is CJS-compatible; configure once
-marked.setOptions({ mangle: false, headerIds: false });
 
 export const Markdown = ({ text, allowHtml = false }: MarkdownProps) => {
   // When allowHtml is falsy, escape raw HTML in the source before marked

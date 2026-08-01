@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { observer } from "mobx-react";
-import { types } from "mobx-state-tree";
+import { types, flow, isAlive } from "mobx-state-tree";
 import { Alert, Button, List, Progress, Typography, Upload } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 
@@ -12,6 +12,7 @@ import RequiredMixin from "../../../mixins/Required";
 import { ReadOnlyControlMixin } from "../../../mixins/ReadOnlyMixin";
 import ControlBase from "../Base";
 import ClassificationBase from "../ClassificationBase";
+import { getForteRuntime, forteAuthHeaders } from "../../../utils/forteRuntime";
 
 import "./FileUpload.scss";
 
@@ -31,43 +32,8 @@ function confirmPart(eTag, partNo) {
   };
 }
 
-/**
- * Reads the runtime upload configuration. Deliberately NOT read from XML
- * attributes: the upload host/auth token/assignment id are per-deployment,
- * rotate independently of any given batch config, and must never be
- * hard-coded into (or exfiltrated via) per-batch Forte XML.
- *
- * Host application must set this before the annotation view mounts:
- *
- * ```js
- * window.ForteUpload = {
- *   baseUrl: "https://forte-backend.example.com",
- *   token: "<knox-token>", // raw token preferred; a "Token "-prefixed value is also accepted
- *   assignmentId: "123",
- * };
- * ```
- */
-function getUploadConfig() {
-  const cfg = typeof window !== "undefined" ? window.ForteUpload : undefined;
-
-  if (!cfg || !cfg.baseUrl || !cfg.token || !cfg.assignmentId) {
-    throw new Error(
-      "FileUpload: window.ForteUpload = {baseUrl, token, assignmentId} must be configured before upload",
-    );
-  }
-  return cfg;
-}
-
 function attachmentsBase(cfg) {
   return `${cfg.baseUrl}/api/v1/active-assignments/${cfg.assignmentId}/attachments`;
-}
-
-function authHeaders(cfg) {
-  const token = cfg.token.startsWith("Token ") ? cfg.token : `Token ${cfg.token}`;
-  return {
-    "Content-Type": "application/json",
-    Authorization: token,
-  };
 }
 
 // One row per file the user picked; tracks upload progress client-side only.
@@ -96,12 +62,13 @@ const FileEntryModel = types
       self.progress = pct;
     },
     setRemoteIds(fileId, uploadId) {
-      self.fileId = fileId;
-      self.uploadId = uploadId;
+      // Backend ids may arrive as numbers; MST fields are strings.
+      self.fileId = fileId == null ? null : String(fileId);
+      self.uploadId = uploadId == null ? null : String(uploadId);
     },
     setUploaded(fileId) {
       self.status = "uploaded";
-      self.fileId = fileId;
+      self.fileId = fileId == null ? null : String(fileId);
       self.progress = 100;
       self.error = null;
     },
@@ -129,8 +96,8 @@ const FileEntryModel = types
  * currently 1h). To display an already-uploaded file, mint a fresh URL via
  * `GET .../attachments/{file_id}/url/` at read time.
  *
- * Upload host/auth are injected at runtime via `window.ForteUpload`, see
- * `getUploadConfig` in this file's source — never via XML attributes.
+ * Upload host/auth are injected at runtime via `window.ForteRuntime`, see
+ * `utils/forteRuntime.js` — never via XML attributes.
  *
  * Deployment prerequisite: the target S3 bucket's CORS configuration must
  * set `ExposeHeaders: ["ETag"]` on the rule covering these PUT requests.
@@ -184,8 +151,15 @@ const Model = types
       return Math.max(1, Number.parseInt(self.maxfiles, 10) || 1);
     },
 
+    // Errored attempts (bad ETag, network failure, etc.) must not permanently
+    // consume a slot — otherwise a couple of failed tries can cap the user
+    // out of ever attaching a file, even though nothing actually uploaded.
+    get activeFileCount() {
+      return self.files.filter((f) => f.status !== "error").length;
+    },
+
     get canAddMore() {
-      return self.files.length < self.maxFilesInt;
+      return self.activeFileCount < self.maxFilesInt;
     },
 
     get holdsState() {
@@ -204,7 +178,15 @@ const Model = types
       return self.selectedValues();
     },
   }))
-  .actions((self) => ({
+  .actions((self) => {
+    // Capture the validate from the mixin chain (RequiredMixin) before we
+    // override it, so required/per-region checks still run after our guard.
+    // Same pattern as RequiredMixin itself uses to chain ClassificationBase.
+    const Super = {
+      validate: self.validate,
+    };
+
+    return {
     unselectAll() {
       // Required by ControlBase; FileUpload has no drawable region to deselect.
     },
@@ -227,7 +209,7 @@ const Model = types
             size: 0,
             status: "uploaded",
             progress: 100,
-            fileId: v.file_id,
+            fileId: v.file_id == null ? null : String(v.file_id),
           }),
         );
       });
@@ -237,38 +219,51 @@ const Model = types
       InfoModal.warning(self.requiredmessage || `Attachment for "${self.name}" is required.`);
     },
 
+    validate() {
+      // Block annotation submission while any file is still in flight so
+      // in-progress uploads don't get silently dropped from the result.
+      const inFlight = self.files.some((f) => f.status === "pending" || f.status === "uploading");
+
+      if (inFlight) {
+        InfoModal.warning("Please wait for all file uploads to complete before submitting.");
+        return false;
+      }
+      // Delegate required / per-region checks to the captured mixin chain.
+      return Super.validate();
+    },
+
     // Best-effort: tells the backend to release the in-progress multipart
     // upload and delete the placeholder File row. Failures are swallowed —
     // this is cleanup, not the primary flow, and must never block the UI.
-    async abortRemote(cfg, fileId, uploadId) {
+    abortRemote: flow(function* abortRemote(cfg, fileId, uploadId) {
       if (!fileId || !uploadId) return;
       try {
-        await fetch(`${attachmentsBase(cfg)}/abort/`, {
+        yield fetch(`${attachmentsBase(cfg)}/abort/`, {
           method: "POST",
-          headers: authHeaders(cfg),
+          headers: forteAuthHeaders(cfg),
           body: JSON.stringify({ id: fileId, uploadId }),
         });
       } catch (e) {
         // ignore - best effort cleanup
       }
-    },
+    }),
 
     // Best-effort: deletes an already-confirmed upload's File row (and its S3
     // object, per the backend's delete-upload contract). Needed because abort
     // only cancels in-progress multipart uploads — without this, removing a
     // completed upload orphans its S3 object forever.
-    async deleteRemote(cfg, fileId) {
+    deleteRemote: flow(function* deleteRemote(cfg, fileId) {
       if (!fileId) return;
       try {
-        await fetch(`${attachmentsBase(cfg)}/delete-upload/`, {
+        yield fetch(`${attachmentsBase(cfg)}/delete-upload/`, {
           method: "DELETE",
-          headers: authHeaders(cfg),
+          headers: forteAuthHeaders(cfg),
           body: JSON.stringify({ id: fileId }),
         });
       } catch (e) {
         // ignore - best effort cleanup
       }
-    },
+    }),
 
     removeFile(id) {
       const entry = self.files.find((f) => f.id === id);
@@ -282,7 +277,7 @@ const Model = types
         self._controllers.delete(id);
 
         try {
-          const cfg = getUploadConfig();
+          const cfg = getForteRuntime();
 
           entry.markAborted();
           self.abortRemote(cfg, entry.fileId, entry.uploadId);
@@ -291,7 +286,7 @@ const Model = types
         }
       } else if (entry.status === "uploaded" && entry.fileId) {
         try {
-          const cfg = getUploadConfig();
+          const cfg = getForteRuntime();
 
           self.deleteRemote(cfg, entry.fileId);
         } catch (e) {
@@ -318,7 +313,7 @@ const Model = types
 
         if (entry.fileId && entry.uploadId) {
           try {
-            const cfg = getUploadConfig();
+            const cfg = getForteRuntime();
 
             entry.markAborted();
             self.abortRemote(cfg, entry.fileId, entry.uploadId);
@@ -334,7 +329,7 @@ const Model = types
     // tests/callers can await the batch.
     addFiles(fileList) {
       const files = Array.from(fileList || []);
-      const room = self.maxFilesInt - self.files.length;
+      const room = self.maxFilesInt - self.activeFileCount;
       const accepted = files.slice(0, Math.max(0, room));
       const dropped = files.length - accepted.length;
 
@@ -358,7 +353,7 @@ const Model = types
       return Promise.all(entries.map((entry, i) => self.uploadFile(entry, accepted[i])));
     },
 
-    async uploadFile(entry, file) {
+    uploadFile: flow(function* uploadFile(entry, file) {
       if (!file || file.size === 0) {
         entry.setError("Cannot upload an empty file");
         return;
@@ -367,7 +362,7 @@ const Model = types
       let cfg;
 
       try {
-        cfg = getUploadConfig();
+        cfg = getForteRuntime();
       } catch (e) {
         entry.setError(e.message);
         return;
@@ -383,9 +378,9 @@ const Model = types
       let initiateData;
 
       try {
-        const initRes = await fetch(`${attachmentsBase(cfg)}/initiate-upload/`, {
+        const initRes = yield fetch(`${attachmentsBase(cfg)}/initiate-upload/`, {
           method: "POST",
-          headers: authHeaders(cfg),
+          headers: forteAuthHeaders(cfg),
           body: JSON.stringify({
             name: file.name,
             type: self.filetype,
@@ -398,9 +393,16 @@ const Model = types
         if (!initRes.ok) {
           throw new Error(`Could not start upload (HTTP ${initRes.status})`);
         }
-        initiateData = await initRes.json();
+        initiateData = yield initRes.json();
       } catch (e) {
-        entry.setError(e.message);
+        // Guard: entry may have been destroyed by removeFile while we awaited.
+        if (isAlive(entry)) entry.setError(e.message);
+        self._controllers.delete(entry.id);
+        return;
+      }
+
+      // Guard before touching the node after the first yield.
+      if (!isAlive(entry)) {
         self._controllers.delete(entry.id);
         return;
       }
@@ -419,7 +421,7 @@ const Model = types
         const chunk = file.slice(start, start + CHUNK_SIZE);
 
         try {
-          const putRes = await fetch(presignedUrls[i], {
+          const putRes = yield fetch(presignedUrls[i], {
             method: "PUT",
             body: chunk,
             signal: controller.signal,
@@ -436,7 +438,8 @@ const Model = types
           }
 
           parts.push(confirmPart(eTag, i + 1));
-          entry.setProgress(Math.round(((i + 1) / presignedUrls.length) * 100));
+          // Guard: node may be destroyed between part uploads.
+          if (isAlive(entry)) entry.setProgress(Math.round(((i + 1) / presignedUrls.length) * 100));
         } catch (e) {
           failure = e;
         }
@@ -446,22 +449,25 @@ const Model = types
       // would silently drop bytes from the object with no way to detect it
       // later, so any failure here always aborts instead of confirming.
       if (failure || parts.length !== presignedUrls.length) {
-        entry.setError(failure?.message || "Upload failed");
+        if (isAlive(entry)) entry.setError(failure?.message || "Upload failed");
         // A concurrent removeFile/abortAllPending may have already fired
         // the backend abort for this entry (e.g. this failure is the
         // rejected fetch from that same controller.abort() call) — don't
         // send a second best-effort abort/ request for the same upload.
-        if (!entry.aborted) {
-          await self.abortRemote(cfg, fileId, uploadId);
+        // Guard: only abort if the entry is still alive AND not already marked
+        // aborted. When isAlive is false the entry was destroyed by removeFile,
+        // which already triggered the backend abort before destroying.
+        if (isAlive(entry) && !entry.aborted) {
+          self.abortRemote(cfg, fileId, uploadId);
         }
         self._controllers.delete(entry.id);
         return;
       }
 
       try {
-        const confirmRes = await fetch(`${attachmentsBase(cfg)}/confirm-upload/`, {
+        const confirmRes = yield fetch(`${attachmentsBase(cfg)}/confirm-upload/`, {
           method: "POST",
-          headers: authHeaders(cfg),
+          headers: forteAuthHeaders(cfg),
           body: JSON.stringify({ id: fileId, uploadId, parts }),
           signal: controller.signal,
         });
@@ -470,20 +476,23 @@ const Model = types
           throw new Error(`Could not confirm upload (HTTP ${confirmRes.status})`);
         }
 
-        const confirmData = await confirmRes.json();
+        const confirmData = yield confirmRes.json();
 
-        entry.setUploaded(confirmData.id || fileId);
-        self.updateResult();
+        if (isAlive(entry)) {
+          entry.setUploaded(confirmData.id || fileId);
+          self.updateResult();
+        }
       } catch (e) {
-        entry.setError(e.message);
-        if (!entry.aborted) {
-          await self.abortRemote(cfg, fileId, uploadId);
+        if (isAlive(entry)) entry.setError(e.message);
+        if (isAlive(entry) && !entry.aborted) {
+          self.abortRemote(cfg, fileId, uploadId);
         }
       } finally {
         self._controllers.delete(entry.id);
       }
-    },
-  }));
+    }),
+    };
+  });
 
 
 const FileUploadModel = types.compose(
@@ -496,6 +505,31 @@ const FileUploadModel = types.compose(
   AnnotationMixin,
   Model,
 );
+
+// Own observer so status/progress changes re-render even though Ant Design List's
+// renderItem runs outside the parent observer's MobX tracking context.
+const FileUploadListItem = observer(({ entry, isReadOnly, onRemove }) => (
+  <List.Item
+    actions={
+      !isReadOnly
+        ? [
+            <Button key="remove" size="small" danger type="link" onClick={() => onRemove(entry.id)}>
+              Remove
+            </Button>,
+          ]
+        : []
+    }
+  >
+    <div className="lsf-file-upload__item">
+      <Text ellipsis style={{ maxWidth: 240 }}>
+        {entry.name}
+      </Text>
+      {entry.status === "uploading" && <Progress percent={entry.progress} size="small" />}
+      {entry.status === "error" && <Alert type="error" message={entry.error} showIcon />}
+      {entry.status === "uploaded" && <Text type="success">Uploaded</Text>}
+    </div>
+  </List.Item>
+));
 
 const HtxFileUpload = observer(({ item }) => {
   const isReadOnly = item.isReadOnly();
@@ -531,28 +565,14 @@ const HtxFileUpload = observer(({ item }) => {
       {item.files.length > 0 && (
         <List
           size="small"
+          rowKey={(entry) => entry.id}
           dataSource={item.files.slice()}
           renderItem={(entry) => (
-            <List.Item
-              actions={
-                !isReadOnly
-                  ? [
-                      <Button key="remove" size="small" danger type="link" onClick={() => item.removeFile(entry.id)}>
-                        Remove
-                      </Button>,
-                    ]
-                  : []
-              }
-            >
-              <div className="lsf-file-upload__item">
-                <Text ellipsis style={{ maxWidth: 240 }}>
-                  {entry.name}
-                </Text>
-                {entry.status === "uploading" && <Progress percent={entry.progress} size="small" />}
-                {entry.status === "error" && <Alert type="error" message={entry.error} showIcon />}
-                {entry.status === "uploaded" && <Text type="success">Uploaded</Text>}
-              </div>
-            </List.Item>
+            <FileUploadListItem
+              entry={entry}
+              isReadOnly={isReadOnly}
+              onRemove={(id) => item.removeFile(id)}
+            />
           )}
         />
       )}

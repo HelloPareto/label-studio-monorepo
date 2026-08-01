@@ -1,5 +1,4 @@
 import katex from "katex";
-import { marked } from "marked";
 import { inject, observer } from "mobx-react";
 import { types } from "mobx-state-tree";
 import { useMemo } from "react";
@@ -12,12 +11,9 @@ import { AnnotationMixin } from "../../mixins/AnnotationMixin";
 import ProcessAttrsMixin from "../../mixins/ProcessAttrs";
 import { parseValue } from "../../utils/data";
 import { sanitizeHtml } from "../../utils/html";
+import { marked } from "../../utils/markedInit";
 import { escapeHtml } from "../../utils/utilities";
 import Base from "./Base";
-
-// marked@4 is CJS-compatible; configure once (shared global singleton, same
-// options as components/Markdown/Markdown.tsx)
-marked.setOptions({ mangle: false, headerIds: false });
 
 const MATH_PLACEHOLDER_PREFIX = "LSFKATEXPLACEHOLDER";
 const MATH_PLACEHOLDER_SUFFIX = "ENDPLACEHOLDER";
@@ -39,6 +35,11 @@ function renderMath(expr, displayMode) {
  * `marked` cannot mistake for markdown syntax (no `_`, `*`, `` ` ``, etc, so
  * it survives emphasis/code-span parsing untouched). Display math is
  * extracted first so its `$$` delimiters aren't consumed by the inline regex.
+ *
+ * `\$` is treated as an escaped literal dollar sign and is never entered into
+ * math mode. Plain currency like `$5` or `$5.00` (no letters or operators) is
+ * also skipped so common financial text is not mis-rendered as math.
+ *
  * @param {string} text
  * @returns {{ text: string, segments: string[], nonce: string }}
  */
@@ -47,17 +48,37 @@ function extractMath(text) {
   const nonce = Math.random().toString(36).slice(2);
   const placeholder = (i) => `${MATH_PLACEHOLDER_PREFIX}${nonce}I${i}${MATH_PLACEHOLDER_SUFFIX}`;
 
-  let out = text.replace(/\$\$([\s\S]+?)\$\$/g, (_match, expr) => {
+  // Step 1: protect `\$` — replace with a unique literal-dollar token that
+  // won't be mistaken for a math delimiter by the regexes below.
+  const ESCAPED_DOLLAR = `${MATH_PLACEHOLDER_PREFIX}${nonce}DOLLAR${MATH_PLACEHOLDER_SUFFIX}`;
+  let out = text.replace(/\\\$/g, ESCAPED_DOLLAR);
+
+  // Step 2: protect currency signs before math extraction.
+  // A currency `$` is one immediately followed by digits (optionally with
+  // commas/dots, e.g. $5, $5.00, $1,000) that is NOT followed by a word
+  // character (which would indicate a math variable like `$5x`).
+  // This must run before the display/inline math regexes so that two
+  // currency amounts on the same line (`$5 and $10`) don't get the text
+  // between them captured as a single `$...$` math span.
+  out = out.replace(/\$(\d[\d,.]*)(?!\w)/g, (_match, num) => `${ESCAPED_DOLLAR}${num}`);
+
+  // Step 3: display math `$$...$$` (must run before inline to avoid `$$`
+  // being consumed as two consecutive inline delimiters).
+  out = out.replace(/\$\$([\s\S]+?)\$\$/g, (_match, expr) => {
     const idx = segments.push(renderMath(expr, true)) - 1;
 
     return placeholder(idx);
   });
 
+  // Step 4: inline math `$...$`.
   out = out.replace(/\$([^\n$]+?)\$/g, (_match, expr) => {
     const idx = segments.push(renderMath(expr, false)) - 1;
 
     return placeholder(idx);
   });
+
+  // Step 5: restore escaped/currency dollars as literal `$`.
+  out = out.replace(new RegExp(ESCAPED_DOLLAR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "$");
 
   return { text: out, segments, nonce };
 }

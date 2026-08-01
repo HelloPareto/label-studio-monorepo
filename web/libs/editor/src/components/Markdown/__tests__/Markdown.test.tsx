@@ -46,3 +46,4 @@ describe("Markdown", () => {
     expect(container.innerHTML).toContain("<strong>bold</strong>");
   });
 });
+

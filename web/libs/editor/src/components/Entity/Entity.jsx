@@ -49,14 +49,19 @@ const renderResult = (result) => {
     return <Paragraph>Rating: {result.mainValue}</Paragraph>;
   }
   if (
-    result.type === "textarea" &&
+    (result.type === "textarea" || result.type === "llmtextarea") &&
     !(result.from_name.perregion && result.from_name.displaymode === PER_REGION_MODES.REGION_LIST)
   ) {
+    const displayText =
+      result.type === "llmtextarea"
+        ? (result.mainValue?.user_input ?? "")
+        : result.mainValue.join("\n");
+
     return (
       <Paragraph className={styles.row}>
         <Text>Text: </Text>
         <Text mark className={styles.long}>
-          {result.mainValue.join("\n")}
+          {displayText}
         </Text>
       </Paragraph>
     );

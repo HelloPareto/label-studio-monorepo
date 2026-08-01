@@ -40,7 +40,7 @@ describe("LLMTextArea Model", () => {
     model.updateResult = jest.fn();
     model.isReadOnly = () => false;
 
-    global.window.ForteUpload = {
+    global.window.ForteRuntime = {
       baseUrl: "http://backend.test",
       token: "test-token",
       assignmentId: "42",
@@ -48,7 +48,7 @@ describe("LLMTextArea Model", () => {
   });
 
   afterEach(() => {
-    delete global.window.ForteUpload;
+    delete global.window.ForteRuntime;
   });
 
   describe("Initial State", () => {
@@ -242,7 +242,7 @@ describe("LLMTextArea Model", () => {
     it("should check if can submit", () => {
       expect(model.canSubmit).toBe(true);
 
-      // After submission with maxSubmissions=1 and editable=true
+      // Simulate a completed generation by setting both submission + generationCount.
       model.submission = {
         id: "sub-1",
         userInput: "Test",
@@ -252,11 +252,12 @@ describe("LLMTextArea Model", () => {
         error: null,
         timestamp: Date.now(),
       };
+      model._generationCount = 1;
 
       // Cannot submit again with maxSubmissions=1
       expect(model.canSubmit).toBe(false);
 
-      // Can submit with maxSubmissions > 1
+      // Can submit with maxSubmissions > 1 (count < max)
       model.maxsubmissions = "2";
       expect(model.canSubmit).toBe(true);
 
@@ -340,15 +341,15 @@ describe("LLMTextArea Model", () => {
       expect(model.submission.error).toBe("Network error");
     });
 
-    it("errors out without window.ForteUpload and does not call fetch", async () => {
-      delete global.window.ForteUpload;
+    it("errors out without window.ForteRuntime and does not call fetch", async () => {
+      delete global.window.ForteRuntime;
       model._currentInput = "Test input";
 
       await model.generateResponse();
 
       expect(global.fetch).not.toHaveBeenCalled();
       expect(model.submission.status).toBe("error");
-      expect(model.submission.error).toMatch(/ForteUpload/);
+      expect(model.submission.error).toMatch(/ForteRuntime/);
     });
 
     it("should handle single response format", async () => {
@@ -369,6 +370,101 @@ describe("LLMTextArea Model", () => {
       expect(model.submission.responses.length).toBe(1);
       expect(model.submission.responses[0].text).toBe("Single response text");
       expect(model.submission.responses[0].metadata.model).toBe("gpt-3.5");
+    });
+  });
+
+  describe("buildPrompt $ escape (no special JS replacement patterns)", () => {
+    it("treats $& in userInput as a literal string, not a backreference", () => {
+      model.prompttemplate = "Prompt: {{input}}";
+      const prompt = model.buildPrompt("price is $& total");
+      expect(prompt).toBe("Prompt: price is $& total");
+    });
+
+    it("treats $$ in userInput as literal $$", () => {
+      model.prompttemplate = "Input: {{input}}";
+      const prompt = model.buildPrompt("cost $$5");
+      expect(prompt).toBe("Input: cost $$5");
+    });
+
+    it("handles backtick replacement pattern $` without expansion", () => {
+      model.prompttemplate = "{{input}}";
+      const prompt = model.buildPrompt("before $` after");
+      expect(prompt).toBe("before $` after");
+    });
+  });
+
+  describe("canSubmit with generationCount", () => {
+    it("starts as true (no generations yet)", () => {
+      expect(model.canSubmit).toBe(true);
+    });
+
+    it("is false after maxSubmissions generations with editable=true and max=1", async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ responses: [{ text: "r", metadata: {} }] }),
+      });
+      model._currentInput = "test";
+      await model.generateResponse();
+      expect(model._generationCount).toBe(1);
+      // maxsubmissions="1", editable=true → still false once we've hit the cap
+      expect(model.canSubmit).toBe(false);
+    });
+
+    it("allows re-generate when maxSubmissions > 1", async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ responses: [{ text: "r", metadata: {} }] }),
+      });
+      model.maxsubmissions = "2";
+      model._currentInput = "test";
+      await model.generateResponse();
+      expect(model.canSubmit).toBe(true);
+      await model.generateResponse();
+      expect(model._generationCount).toBe(2);
+      expect(model.canSubmit).toBe(false);
+    });
+
+    it("resets generationCount on deleteSubmission", async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ responses: [{ text: "r", metadata: {} }] }),
+      });
+      model._currentInput = "test";
+      await model.generateResponse();
+      expect(model._generationCount).toBe(1);
+      model.deleteSubmission();
+      expect(model._generationCount).toBe(0);
+      expect(model.canSubmit).toBe(true);
+    });
+  });
+
+  describe("AbortController — delete during generate", () => {
+    it("aborts in-flight fetch when deleteSubmission is called during generate", async () => {
+      let resolveFetch;
+      global.fetch = jest.fn().mockReturnValueOnce(
+        new Promise((resolve) => { resolveFetch = resolve; })
+      );
+
+      model._currentInput = "test";
+      const genPromise = model.generateResponse();
+
+      // Let MST/flow tick so submission is created and fetch is in flight
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.submission?.status).toBe("loading");
+
+      // Abort via deleteSubmission
+      model.deleteSubmission();
+      expect(model.submission).toBe(null);
+
+      // Resolve the fetch after abort — should not throw or update submission
+      resolveFetch({ ok: true, json: async () => ({ responses: [] }) });
+      await genPromise;
+
+      // Model should stay clean — no orphan submission
+      expect(model.submission).toBe(null);
     });
   });
 });

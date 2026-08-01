@@ -61,6 +61,7 @@ const PanelModel = types
       "list",
       "dialog",
       "textarea",
+      "llmtextarea",
       "markdown",
       "latextext",
       "fileupload",

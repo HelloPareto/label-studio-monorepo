@@ -37,6 +37,7 @@ import { guidGenerator } from "../../utils/unique";
  * @meta_title Markdown Tag for Rendering Markdown Text
  * @meta_description Customize Label Studio with the Markdown tag to display formatted markdown text content for machine learning and data science projects.
  * @param {string} value - Markdown text content, either static text or field name in task data (e.g., $markdown_field)
+ * @param {boolean} [allowHtml=false] - Allow raw HTML in the markdown source (disabled by default for safety)
  * @param {string} [style] - CSS style string
  * @param {string} [className] - Class name of the CSS style to apply
  * @param {string} [idAttr] - Unique ID attribute to use in CSS
@@ -54,10 +55,13 @@ const Model = types
     classname: types.optional(types.string, ""),
     style: types.maybeNull(types.string),
     idattr: types.optional(types.string, ""),
+    allowhtml: types.optional(types.boolean, false),
   })
   .actions((self) => ({
     updateValue(store) {
-      const value = parseValue(self.value, store?.task?.dataObj ?? {});
+      const raw = parseValue(self.value, store?.task?.dataObj ?? {});
+      // Cast to string first so non-string task values (numbers, null) don't crash.
+      const value = String(raw ?? "");
 
       // cut CDATA
       self._value = value.replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, "");
@@ -75,7 +79,7 @@ const HtxMarkdown = observer(({ item }) => {
 
   return (
     <div id={item.idattr} className={item.classname} style={style}>
-      <Markdown text={item._value || ""} allowHtml />
+      <Markdown text={item._value || ""} allowHtml={item.allowhtml} />
     </div>
   );
 });

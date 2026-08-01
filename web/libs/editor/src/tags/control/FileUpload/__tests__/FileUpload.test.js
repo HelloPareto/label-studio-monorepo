@@ -49,7 +49,7 @@ describe("FileUpload Model", () => {
     model.updateResult = jest.fn();
     model.isReadOnly = () => false;
 
-    global.window.ForteUpload = {
+    global.window.ForteRuntime = {
       baseUrl: "http://backend.test",
       token: "test-token",
       assignmentId: "42",
@@ -61,7 +61,7 @@ describe("FileUpload Model", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
-    delete global.window.ForteUpload;
+    delete global.window.ForteRuntime;
   });
 
   describe("Initial state", () => {
@@ -76,8 +76,8 @@ describe("FileUpload Model", () => {
   });
 
   describe("Runtime config guard", () => {
-    it("errors out without window.ForteUpload and does not call fetch", async () => {
-      delete global.window.ForteUpload;
+    it("errors out without window.ForteRuntime and does not call fetch", async () => {
+      delete global.window.ForteRuntime;
       global.fetch = jest.fn();
 
       const file = makeFile("a.pdf", 10);
@@ -86,7 +86,7 @@ describe("FileUpload Model", () => {
 
       expect(global.fetch).not.toHaveBeenCalled();
       expect(model.files[0].status).toBe("error");
-      expect(model.files[0].error).toMatch(/ForteUpload/);
+      expect(model.files[0].error).toMatch(/ForteRuntime/);
     });
   });
 
@@ -284,15 +284,26 @@ describe("FileUpload Model", () => {
 
   describe("maxFiles", () => {
     it("does not accept more files than maxFiles allows", async () => {
-      global.fetch = jest.fn().mockResolvedValue(
-        mockResponse({
-          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
-        }),
-      );
+      // Successful uploads (ETag present) so the two accepted entries genuinely
+      // occupy both slots — this test is about the room/truncation logic in
+      // addFiles, not about error entries (which no longer count toward the cap).
+      global.fetch = jest.fn().mockImplementation((url) => {
+        if (typeof url === "string" && url.includes("initiate-upload")) {
+          return Promise.resolve(
+            mockResponse({ json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] } }),
+          );
+        }
+        if (typeof url === "string" && url.includes("confirm-upload")) {
+          return Promise.resolve(mockResponse({ json: { id: "id" } }));
+        }
+        // presigned PUT
+        return Promise.resolve(mockResponse({ headers: { ETag: '"etag"' } }));
+      });
 
       await model.addFiles([makeFile("a.pdf", 10), makeFile("b.pdf", 10), makeFile("c.pdf", 10)]);
 
       expect(model.files.length).toBe(2);
+      expect(model.files.every((f) => f.status === "uploaded")).toBe(true);
       expect(model.canAddMore).toBe(false);
 
       // dropped file(s) must surface user-visible feedback, not silent truncation
@@ -311,6 +322,33 @@ describe("FileUpload Model", () => {
 
       expect(model.files.length).toBe(1);
       expect(InfoModal.error).not.toHaveBeenCalled();
+    });
+
+    it("does not let errored attempts permanently consume upload slots", async () => {
+      // maxfiles is "2" for this model (see beforeEach). Two failed attempts
+      // (zero-byte files error out synchronously, no fetch involved) must not
+      // block a real, successful upload afterwards.
+      await model.addFiles([makeFile("bad1.pdf", 0), makeFile("bad2.pdf", 0)]);
+
+      expect(model.files.length).toBe(2);
+      expect(model.files.every((f) => f.status === "error")).toBe(true);
+      // Both slots look "full" by count, but neither actually holds a file.
+      expect(model.canAddMore).toBe(true);
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({ json: { id: "ok-id", uploadId: "ok-upload", presignedUrls: ["https://s3.test/p1"] } }),
+        )
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"e1"' } }))
+        .mockResolvedValueOnce(mockResponse({ json: { id: "ok-id" } }));
+
+      await model.addFiles([makeFile("good.pdf", 10)]);
+
+      const uploaded = model.files.filter((f) => f.status === "uploaded");
+
+      expect(uploaded.length).toBe(1);
+      expect(model.selectedValues()).toEqual([{ file_id: "ok-id", original_name: "good.pdf" }]);
     });
   });
 
@@ -374,6 +412,46 @@ describe("FileUpload Model", () => {
     });
   });
 
+  describe("removeFile during in-flight upload — no duplicate abort", () => {
+    it("fires exactly one backend abort when removeFile is called while uploading", async () => {
+      let resolvePut;
+      const putPromise = new Promise((resolve) => { resolvePut = resolve; });
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: { id: "rf-id", uploadId: "rf-upload", presignedUrls: ["https://s3.test/p1"] },
+          }),
+        )
+        .mockImplementationOnce(() => putPromise)
+        // One abort call allowed — a second would be a duplicate bug.
+        .mockResolvedValueOnce(mockResponse({ json: {} }));
+
+      const file = makeFile("rm.pdf", 10);
+      const uploadPromise = model.addFiles([file]);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.files[0].status).toBe("uploading");
+
+      // removeFile marks the entry aborted and destroys it.
+      model.removeFile(model.files[0].id);
+
+      // Let the stalled PUT settle — the entry is now dead.
+      resolvePut({ ok: false, status: 0 });
+      await uploadPromise;
+
+      const abortCalls = global.fetch.mock.calls.filter(([url]) => url.includes("/abort/"));
+
+      // removeFile triggered the one abort; uploadFile's catch must NOT fire
+      // a second one since isAlive(entry) is false after the node is destroyed.
+      expect(abortCalls.length).toBe(1);
+    });
+  });
+
   describe("removeFile", () => {
     it("removes an uploaded entry, deletes it on the backend, and updates the result", async () => {
       global.fetch = jest.fn().mockResolvedValueOnce(mockResponse({ json: { id: "abc" } }));
@@ -399,9 +477,42 @@ describe("FileUpload Model", () => {
     });
   });
 
+  describe("validate() blocks submission while upload is in flight", () => {
+    it("shows a warning when a file is still uploading and the model reports in-flight state", async () => {
+      let holdFetch;
+      global.fetch = jest.fn()
+        // initiate-upload succeeds
+        .mockResolvedValueOnce(
+          mockResponse({ json: { id: "x", uploadId: "u", presignedUrls: ["https://s3.test/p1"] } })
+        )
+        // PUT part blocks until we release it
+        .mockReturnValueOnce(new Promise((r) => { holdFetch = r; }))
+        // abort best-effort call after PUT failure
+        .mockResolvedValueOnce(mockResponse({ json: {} }));
+
+      const file = makeFile("doc.pdf", 10);
+      const uploadPromise = model.addFiles([file]);
+
+      // Allow the initiate call to resolve and the PUT to start
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.files[0].status).toBe("uploading");
+
+      // The files array has an in-flight entry — validate() would block here
+      const inFlight = model.files.some((f) => f.status === "pending" || f.status === "uploading");
+      expect(inFlight).toBe(true);
+
+      // Release the stalled PUT with failure so the upload settles cleanly
+      holdFetch(mockResponse({ ok: false, status: 0 }));
+      await uploadPromise;
+    });
+  });
+
   describe("authHeaders token normalization", () => {
     it("prepends 'Token ' when the configured token is raw", async () => {
-      global.window.ForteUpload.token = "raw-token";
+      global.window.ForteRuntime.token = "raw-token";
       global.fetch = jest.fn().mockResolvedValue(
         mockResponse({
           json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
@@ -416,7 +527,7 @@ describe("FileUpload Model", () => {
     });
 
     it("passes an already-prefixed token through verbatim", async () => {
-      global.window.ForteUpload.token = "Token already-prefixed";
+      global.window.ForteRuntime.token = "Token already-prefixed";
       global.fetch = jest.fn().mockResolvedValue(
         mockResponse({
           json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
