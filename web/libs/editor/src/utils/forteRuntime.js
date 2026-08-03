@@ -16,9 +16,6 @@
  * };
  * ```
  *
- * `window.ForteUpload` is still accepted as a legacy alias (same shape) so older
- * host builds keep working during the rename.
- *
  * Auth uses Knox `Authorization: Token …` because production backend-ai drops
  * SessionAuthentication (only Knox + SAK accepted at !DEBUG). The Knox session
  * token is stored in a readable cookie by Auth0 login; hosts copy it here the
@@ -26,14 +23,12 @@
  */
 
 /**
- * Reads and validates the Forte runtime config from `window.ForteRuntime`
- * (or legacy `window.ForteUpload`).
+ * Reads and validates the Forte runtime config from `window.ForteRuntime`.
  * Throws a clear error if any required field is missing.
  * @returns {{ baseUrl: string, token: string, assignmentId: string }}
  */
 export function getForteRuntime() {
-  const cfg =
-    typeof window !== "undefined" ? (window.ForteRuntime ?? window.ForteUpload) : undefined;
+  const cfg = typeof window !== "undefined" ? window.ForteRuntime : undefined;
 
   if (!cfg || !cfg.baseUrl || !cfg.token || !cfg.assignmentId) {
     throw new Error(
