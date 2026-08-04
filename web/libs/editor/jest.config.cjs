@@ -62,5 +62,8 @@ module.exports = {
   },
   testPathIgnorePatterns: ["/node_modules/", "/e2e/"],
   testRegex: "__tests__/.*.test.[tj]sx?",
-  transformIgnorePatterns: ["node_modules/(?!(nanoid|konva|chroma-js|@thi\\.ng)/)"],
+  // d3-color is pinned to an ESM-only build via the root `resolutions` field
+  // (web/package.json), which every d3@5 consumer (d3-interpolate,
+  // d3-scale-chromatic, d3-transition, and `d3` itself) transitively pulls in.
+  transformIgnorePatterns: ["node_modules/(?!(nanoid|konva|chroma-js|@thi\\.ng|d3-color)/)"],
 };

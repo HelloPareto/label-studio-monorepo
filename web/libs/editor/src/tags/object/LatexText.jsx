@@ -110,7 +110,8 @@ export function renderLatexMarkdown(text, { format = "markdown" } = {}) {
   if (!text) return "";
 
   const { text: withPlaceholders, segments, nonce } = extractMath(text);
-  const html = format === "text" ? escapeHtml(withPlaceholders).replace(/\n/g, "<br/>") : marked.parse(withPlaceholders);
+  const html =
+    format === "text" ? escapeHtml(withPlaceholders).replace(/\n/g, "<br/>") : marked.parse(withPlaceholders);
   const restored = restoreMath(html, segments, nonce);
 
   return sanitizeHtml(restored);

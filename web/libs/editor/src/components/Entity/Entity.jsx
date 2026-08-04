@@ -53,9 +53,7 @@ const renderResult = (result) => {
     !(result.from_name.perregion && result.from_name.displaymode === PER_REGION_MODES.REGION_LIST)
   ) {
     const displayText =
-      result.type === "llmtextarea"
-        ? (result.mainValue?.user_input ?? "")
-        : result.mainValue.join("\n");
+      result.type === "llmtextarea" ? (result.mainValue?.user_input ?? "") : result.mainValue.join("\n");
 
     return (
       <Paragraph className={styles.row}>

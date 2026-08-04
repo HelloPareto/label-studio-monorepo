@@ -88,31 +88,34 @@ const TagAttrs = types.model({
 });
 
 // Single submission that holds user input + LLM responses
-const LLMSubmission = types.model("LLMSubmission", {
-  id: types.identifier,
-  userInput: types.string,
-  prompt: types.string, // Processed prompt sent to backend
-  responses: types.array(types.model("LLMResponse", {
-    text: types.string,
-    metadata: types.frozen(), // model, tokens, etc
-  })),
-  status: types.enumeration("LLMStatus", ['idle', 'loading', 'success', 'error']),
-  error: types.maybeNull(types.string),
-  timestamp: types.number,
-})
+const LLMSubmission = types
+  .model("LLMSubmission", {
+    id: types.identifier,
+    userInput: types.string,
+    prompt: types.string, // Processed prompt sent to backend
+    responses: types.array(
+      types.model("LLMResponse", {
+        text: types.string,
+        metadata: types.frozen(), // model, tokens, etc
+      }),
+    ),
+    status: types.enumeration("LLMStatus", ["idle", "loading", "success", "error"]),
+    error: types.maybeNull(types.string),
+    timestamp: types.number,
+  })
   .actions((self) => ({
     setLoading() {
-      self.status = 'loading';
+      self.status = "loading";
       self.error = null;
     },
 
     setSuccess() {
-      self.status = 'success';
+      self.status = "success";
       self.error = null;
     },
 
     setError(errorMessage) {
-      self.status = 'error';
+      self.status = "error";
       self.error = errorMessage;
     },
 
@@ -170,7 +173,7 @@ const Model = types
     },
 
     get isLoading() {
-      return self.submission?.status === 'loading';
+      return self.submission?.status === "loading";
     },
 
     get numResponsesInt() {
@@ -183,7 +186,7 @@ const Model = types
       return {
         user_input: self.submission.userInput,
         prompt: self.submission.prompt,
-        responses: self.submission.responses.map(r => ({
+        responses: self.submission.responses.map((r) => ({
           text: r.text,
           metadata: r.metadata,
         })),
@@ -200,13 +203,13 @@ const Model = types
       let template = self.prompttemplate;
 
       // If it's a $task.field reference, resolve it
-      if (template.startsWith('$')) {
+      if (template.startsWith("$")) {
         template = parseValue(template, self.annotation?.store?.task?.dataObj ?? {});
       }
 
       // If template is still not a string (e.g., undefined), use empty string
-      if (typeof template !== 'string') {
-        template = '';
+      if (typeof template !== "string") {
+        template = "";
       }
 
       // Use replacer functions so JS special replacement patterns in the user's
@@ -227,212 +230,208 @@ const Model = types
     const Super = { validate: self.validate };
 
     return {
-    setValue(value) {
-      self._currentInput = value;
-    },
+      setValue(value) {
+        self._currentInput = value;
+      },
 
-    startEditing() {
-      if (self.submission && self.editable && !self.isReadOnly() && self.canSubmit) {
-        self._isEditing = true;
-        self._currentInput = self.submission.userInput;
-      }
-    },
-
-    cancelEditing() {
-      self._isEditing = false;
-      self._currentInput = "";
-    },
-
-    // Abort any in-flight generate fetch (used on unmount and before delete).
-    abortGenerate() {
-      if (self._generateController) {
-        self._generateController.abort();
-        self._generateController = null;
-      }
-    },
-
-    deleteSubmission() {
-      if (self.submission) {
-        // Cancel any in-flight generate for this submission before nulling it.
-        self.abortGenerate();
-
-        // self.result can throw if not attached to a real annotation tree yet.
-        try {
-          if (self.result) {
-            self.result.area.deleteRegion();
-          }
-        } catch (e) {
-          // no attached annotation store; nothing to delete
+      startEditing() {
+        if (self.submission && self.editable && !self.isReadOnly() && self.canSubmit) {
+          self._isEditing = true;
+          self._currentInput = self.submission.userInput;
         }
+      },
 
-        self.submission = null;
-        self._currentInput = "";
+      cancelEditing() {
         self._isEditing = false;
-        self._generationCount = 0;
-        self.updateResult();
-      }
-    },
+        self._currentInput = "";
+      },
 
-    generateResponse: flow(function* generateResponse() {
-      if (!self._currentInput.trim()) {
-        InfoModal.warning("Please enter some text");
-        return;
-      }
-
-      const userInput = self._currentInput.trim();
-      const finalPrompt = self.buildPrompt(userInput);
-
-      // Create or update submission
-      if (!self.submission) {
-        self.submission = LLMSubmission.create({
-          id: guidGenerator(),
-          userInput,
-          prompt: finalPrompt,
-          responses: [],
-          status: 'loading',
-          error: null,
-          timestamp: Date.now(),
-        });
-      } else {
-        self.submission.updateInput(userInput, finalPrompt);
-        self.submission.clearResponses();
-        self.submission.setLoading();
-      }
-
-      self._isEditing = false;
-
-      let cfg;
-
-      try {
-        cfg = getForteRuntime();
-      } catch (e) {
-        if (isAlive(self) && self.submission) self.submission.setError(e.message);
-        return;
-      }
-
-      // Create a fresh AbortController for this request.
-      self.abortGenerate();
-      const controller = new AbortController();
-      self._generateController = controller;
-
-      try {
-        const requestBody = {
-          prompt: finalPrompt,
-          num_responses: self.numResponsesInt,
-          task_id: self.annotation?.store?.task?.id,
-          annotation_id: self.annotation?.id,
-        };
-
-        const response = yield fetch(generateEndpoint(cfg), {
-          method: 'POST',
-          headers: forteAuthHeaders(cfg),
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        });
-
-        // Guard: model may have been destroyed or submission deleted while awaiting.
-        if (!isAlive(self) || !self.submission) return;
-
-        if (!response.ok) {
-          const errorData = yield response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = yield response.json();
-
-        if (!isAlive(self) || !self.submission) return;
-
-        if (data.error) {
-          throw new Error(data.error);
-        }
-
-        self.submission.setSuccess();
-        self._generationCount += 1;
-
-        if (data.responses && Array.isArray(data.responses)) {
-          data.responses.forEach(resp => {
-            self.submission.addResponse(
-              resp.text || resp.response || '',
-              resp.metadata || { model: resp.model, tokens: resp.tokens }
-            );
-          });
-        } else {
-          const responseText = data.response || data.text || '';
-          self.submission.addResponse(
-            responseText,
-            { model: data.model, tokens: data.tokens }
-          );
-        }
-
-        self.updateResult();
-
-      } catch (error) {
-        if (!isAlive(self) || !self.submission) return;
-        self.submission.setError(error.message);
-      } finally {
-        if (isAlive(self) && self._generateController === controller) {
+      // Abort any in-flight generate fetch (used on unmount and before delete).
+      abortGenerate() {
+        if (self._generateController) {
+          self._generateController.abort();
           self._generateController = null;
         }
-      }
-    }),
+      },
 
-    needsUpdate() {
-      if (self.result) {
-        self.updateFromResult(self.result.mainValue);
-      }
-    },
+      deleteSubmission() {
+        if (self.submission) {
+          // Cancel any in-flight generate for this submission before nulling it.
+          self.abortGenerate();
 
-    updateFromResult(value) {
-      if (!value) {
-        self.submission = null;
-        self._currentInput = "";
-        return;
-      }
+          // self.result can throw if not attached to a real annotation tree yet.
+          try {
+            if (self.result) {
+              self.result.area.deleteRegion();
+            }
+          } catch (e) {
+            // no attached annotation store; nothing to delete
+          }
 
-      self.submission = LLMSubmission.create({
-        id: guidGenerator(),
-        userInput: value.user_input || "",
-        prompt: value.prompt || "",
-        responses: (value.responses || []).map(r => ({
-          text: r.text,
-          metadata: r.metadata || {},
-        })),
-        status: 'success',
-        error: null,
-        timestamp: value.timestamp || Date.now(),
-      });
-    },
+          self.submission = null;
+          self._currentInput = "";
+          self._isEditing = false;
+          self._generationCount = 0;
+          self.updateResult();
+        }
+      },
 
-    requiredModal() {
-      InfoModal.warning(self.requiredmessage || `Input for "${self.name}" is required.`);
-    },
+      generateResponse: flow(function* generateResponse() {
+        if (!self._currentInput.trim()) {
+          InfoModal.warning("Please enter some text");
+          return;
+        }
 
-    validate() {
-      // Block submit while a generate is in flight.
-      if (self.isLoading) {
-        InfoModal.warning("Please wait for the LLM response to finish before submitting.");
-        return false;
-      }
-      // Block submit if the user has typed input but hasn't generated yet.
-      if (self._currentInput.trim() && !self.submission) {
-        InfoModal.warning("Please generate a response before submitting.");
-        return false;
-      }
-      return Super.validate();
-    },
+        const userInput = self._currentInput.trim();
+        const finalPrompt = self.buildPrompt(userInput);
 
-    beforeSend() {
-      // validate() handles all blocking; nothing extra needed here.
-    },
+        // Create or update submission
+        if (!self.submission) {
+          self.submission = LLMSubmission.create({
+            id: guidGenerator(),
+            userInput,
+            prompt: finalPrompt,
+            responses: [],
+            status: "loading",
+            error: null,
+            timestamp: Date.now(),
+          });
+        } else {
+          self.submission.updateInput(userInput, finalPrompt);
+          self.submission.clearResponses();
+          self.submission.setLoading();
+        }
 
-    getSelectedString() {
-      if (!self.submission) return "";
-      return `${self.submission.responses.length} response(s)`;
-    },
+        self._isEditing = false;
 
-    unselectAll() {
-      // Required by ControlBase
-    },
+        let cfg;
+
+        try {
+          cfg = getForteRuntime();
+        } catch (e) {
+          if (isAlive(self) && self.submission) self.submission.setError(e.message);
+          return;
+        }
+
+        // Create a fresh AbortController for this request.
+        self.abortGenerate();
+        const controller = new AbortController();
+        self._generateController = controller;
+
+        try {
+          const requestBody = {
+            prompt: finalPrompt,
+            num_responses: self.numResponsesInt,
+            task_id: self.annotation?.store?.task?.id,
+            annotation_id: self.annotation?.id,
+          };
+
+          const response = yield fetch(generateEndpoint(cfg), {
+            method: "POST",
+            headers: forteAuthHeaders(cfg),
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          });
+
+          // Guard: model may have been destroyed or submission deleted while awaiting.
+          if (!isAlive(self) || !self.submission) return;
+
+          if (!response.ok) {
+            const errorData = yield response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = yield response.json();
+
+          if (!isAlive(self) || !self.submission) return;
+
+          if (data.error) {
+            throw new Error(data.error);
+          }
+
+          self.submission.setSuccess();
+          self._generationCount += 1;
+
+          if (data.responses && Array.isArray(data.responses)) {
+            data.responses.forEach((resp) => {
+              self.submission.addResponse(
+                resp.text || resp.response || "",
+                resp.metadata || { model: resp.model, tokens: resp.tokens },
+              );
+            });
+          } else {
+            const responseText = data.response || data.text || "";
+            self.submission.addResponse(responseText, { model: data.model, tokens: data.tokens });
+          }
+
+          self.updateResult();
+        } catch (error) {
+          if (!isAlive(self) || !self.submission) return;
+          self.submission.setError(error.message);
+        } finally {
+          if (isAlive(self) && self._generateController === controller) {
+            self._generateController = null;
+          }
+        }
+      }),
+
+      needsUpdate() {
+        if (self.result) {
+          self.updateFromResult(self.result.mainValue);
+        }
+      },
+
+      updateFromResult(value) {
+        if (!value) {
+          self.submission = null;
+          self._currentInput = "";
+          return;
+        }
+
+        self.submission = LLMSubmission.create({
+          id: guidGenerator(),
+          userInput: value.user_input || "",
+          prompt: value.prompt || "",
+          responses: (value.responses || []).map((r) => ({
+            text: r.text,
+            metadata: r.metadata || {},
+          })),
+          status: "success",
+          error: null,
+          timestamp: value.timestamp || Date.now(),
+        });
+      },
+
+      requiredModal() {
+        InfoModal.warning(self.requiredmessage || `Input for "${self.name}" is required.`);
+      },
+
+      validate() {
+        // Block submit while a generate is in flight.
+        if (self.isLoading) {
+          InfoModal.warning("Please wait for the LLM response to finish before submitting.");
+          return false;
+        }
+        // Block submit if the user has typed input but hasn't generated yet.
+        if (self._currentInput.trim() && !self.submission) {
+          InfoModal.warning("Please generate a response before submitting.");
+          return false;
+        }
+        return Super.validate();
+      },
+
+      beforeSend() {
+        // validate() handles all blocking; nothing extra needed here.
+      },
+
+      getSelectedString() {
+        if (!self.submission) return "";
+        return `${self.submission.responses.length} response(s)`;
+      },
+
+      unselectAll() {
+        // Required by ControlBase
+      },
     };
   });
 
@@ -472,7 +471,7 @@ const HtxLLMTextArea = observer(({ item }) => {
             placeholder={item.placeholder || "Enter your input..."}
             disabled={item.isLoading || isReadOnly}
             onChange={(e) => item.setValue(e.target.value)}
-            style={{ marginBottom: '10px' }}
+            style={{ marginBottom: "10px" }}
           />
 
           <Space>
@@ -482,14 +481,10 @@ const HtxLLMTextArea = observer(({ item }) => {
               loading={item.isLoading}
               disabled={!item._currentInput.trim() || isReadOnly || !item.canSubmit}
             >
-              {item.isLoading ? 'Generating...' : 'Generate Response'}
+              {item.isLoading ? "Generating..." : "Generate Response"}
             </Button>
 
-            {item.hasSubmitted && (
-              <Button onClick={() => item.cancelEditing()}>
-                Cancel
-              </Button>
-            )}
+            {item.hasSubmitted && <Button onClick={() => item.cancelEditing()}>Cancel</Button>}
           </Space>
         </div>
       )}
@@ -501,30 +496,20 @@ const HtxLLMTextArea = observer(({ item }) => {
             title={
               <Space>
                 <span>Submission</span>
-                {item.submission.status === 'loading' && <Spin size="small" />}
-                {item.submission.status === 'success' && <CheckOutlined />}
+                {item.submission.status === "loading" && <Spin size="small" />}
+                {item.submission.status === "success" && <CheckOutlined />}
               </Space>
             }
             extra={
               !isReadOnly && (
                 <Space>
-                  {item.editable && item.canSubmit && item.submission.status !== 'loading' && (
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => item.startEditing()}
-                    >
+                  {item.editable && item.canSubmit && item.submission.status !== "loading" && (
+                    <Button type="text" size="small" icon={<EditOutlined />} onClick={() => item.startEditing()}>
                       Edit
                     </Button>
                   )}
-                  {item.submission.status === 'error' && (
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      onClick={() => item.generateResponse()}
-                    >
+                  {item.submission.status === "error" && (
+                    <Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => item.generateResponse()}>
                       Retry
                     </Button>
                   )}
@@ -535,7 +520,7 @@ const HtxLLMTextArea = observer(({ item }) => {
                     icon={<DeleteOutlined />}
                     disabled={item.isLoading}
                     onClick={() => {
-                      if (window.confirm('Delete this submission?')) {
+                      if (window.confirm("Delete this submission?")) {
                         item.deleteSubmission();
                       }
                     }}
@@ -548,21 +533,21 @@ const HtxLLMTextArea = observer(({ item }) => {
           >
             <div className="lsf-llm-textarea__user-input">
               <Text strong>Your Input:</Text>
-              <div className="lsf-llm-textarea__user-input-text">
-                {item.submission.userInput}
-              </div>
+              <div className="lsf-llm-textarea__user-input-text">{item.submission.userInput}</div>
             </div>
 
-            {item.submission.status === 'loading' && (
+            {item.submission.status === "loading" && (
               <div className="lsf-llm-textarea__loading">
                 <Spin size="large" />
                 <div>
-                  <Text type="secondary">Generating {item.numResponsesInt} response{item.numResponsesInt > 1 ? 's' : ''}...</Text>
+                  <Text type="secondary">
+                    Generating {item.numResponsesInt} response{item.numResponsesInt > 1 ? "s" : ""}...
+                  </Text>
                 </div>
               </div>
             )}
 
-            {item.submission.status === 'error' && (
+            {item.submission.status === "error" && (
               <Alert
                 message="Generation Failed"
                 description={item.submission.error}
@@ -576,29 +561,26 @@ const HtxLLMTextArea = observer(({ item }) => {
               />
             )}
 
-            {item.submission.status === 'success' && item.submission.responses.length > 0 && (
+            {item.submission.status === "success" && item.submission.responses.length > 0 && (
               <div className="lsf-llm-textarea__responses">
                 <Text strong>
                   {item.submission.responses.length > 1
                     ? `LLM Responses (${item.submission.responses.length}):`
-                    : 'LLM Response:'
-                  }
+                    : "LLM Response:"}
                 </Text>
 
                 {item.submission.responses.map((response, idx) => (
                   <div key={idx} className="lsf-llm-textarea__response-item">
                     {item.submission.responses.length > 1 && (
-                      <Text strong style={{ display: 'block', marginBottom: '8px' }}>
+                      <Text strong style={{ display: "block", marginBottom: "8px" }}>
                         Response {idx + 1}:
                       </Text>
                     )}
-                    <div className="lsf-llm-textarea__response-text">
-                      {response.text}
-                    </div>
+                    <div className="lsf-llm-textarea__response-text">{response.text}</div>
 
                     {response.metadata && (response.metadata.model || response.metadata.tokens) && (
                       <div className="lsf-llm-textarea__response-meta">
-                        <Text type="secondary" style={{ fontSize: '0.85em' }}>
+                        <Text type="secondary" style={{ fontSize: "0.85em" }}>
                           {response.metadata.model && `Model: ${response.metadata.model}`}
                           {response.metadata.tokens && ` • Tokens: ${response.metadata.tokens}`}
                         </Text>
@@ -608,7 +590,7 @@ const HtxLLMTextArea = observer(({ item }) => {
                 ))}
 
                 <div className="lsf-llm-textarea__timestamp">
-                  <Text type="secondary" style={{ fontSize: '0.85em' }}>
+                  <Text type="secondary" style={{ fontSize: "0.85em" }}>
                     Generated {new Date(item.submission.timestamp).toLocaleString()}
                   </Text>
                 </div>

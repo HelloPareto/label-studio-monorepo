@@ -43,7 +43,9 @@ export const AreaMixinBase = types
     },
 
     get texting() {
-      return isAlive(self) && self.results.find((r) => (r.type === "textarea" || r.type === "llmtextarea") && r.hasValue);
+      return (
+        isAlive(self) && self.results.find((r) => (r.type === "textarea" || r.type === "llmtextarea") && r.hasValue)
+      );
     },
 
     get tag() {
@@ -102,8 +104,7 @@ export const AreaMixinBase = types
       let text;
       if (textingResult?.type === "llmtextarea") {
         const val = textingResult?.mainValue;
-        text = (typeof val === "object" && val !== null ? val.user_input : null)
-          ?.replace(/\n\r|\n/, " ");
+        text = (typeof val === "object" && val !== null ? val.user_input : null)?.replace(/\n\r|\n/, " ");
       } else {
         text = textingResult?.mainValue?.[0]?.replace(/\n\r|\n/, " ");
       }

@@ -302,7 +302,7 @@ describe("LLMTextArea Model", () => {
             Authorization: "Token test-token",
           },
           body: expect.any(String),
-        })
+        }),
       );
 
       const callBody = JSON.parse(global.fetch.mock.calls[0][1].body);
@@ -442,7 +442,9 @@ describe("LLMTextArea Model", () => {
     it("aborts in-flight fetch when deleteSubmission is called during generate", async () => {
       let resolveFetch;
       global.fetch = jest.fn().mockReturnValueOnce(
-        new Promise((resolve) => { resolveFetch = resolve; })
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
       );
 
       model._currentInput = "test";

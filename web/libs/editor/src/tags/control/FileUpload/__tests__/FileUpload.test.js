@@ -415,7 +415,9 @@ describe("FileUpload Model", () => {
   describe("removeFile during in-flight upload — no duplicate abort", () => {
     it("fires exactly one backend abort when removeFile is called while uploading", async () => {
       let resolvePut;
-      const putPromise = new Promise((resolve) => { resolvePut = resolve; });
+      const putPromise = new Promise((resolve) => {
+        resolvePut = resolve;
+      });
 
       global.fetch = jest
         .fn()
@@ -480,13 +482,18 @@ describe("FileUpload Model", () => {
   describe("validate() blocks submission while upload is in flight", () => {
     it("shows a warning when a file is still uploading and the model reports in-flight state", async () => {
       let holdFetch;
-      global.fetch = jest.fn()
+      global.fetch = jest
+        .fn()
         // initiate-upload succeeds
         .mockResolvedValueOnce(
-          mockResponse({ json: { id: "x", uploadId: "u", presignedUrls: ["https://s3.test/p1"] } })
+          mockResponse({ json: { id: "x", uploadId: "u", presignedUrls: ["https://s3.test/p1"] } }),
         )
         // PUT part blocks until we release it
-        .mockReturnValueOnce(new Promise((r) => { holdFetch = r; }))
+        .mockReturnValueOnce(
+          new Promise((r) => {
+            holdFetch = r;
+          }),
+        )
         // abort best-effort call after PUT failure
         .mockResolvedValueOnce(mockResponse({ json: {} }));
 

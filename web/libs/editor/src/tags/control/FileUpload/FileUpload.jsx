@@ -187,131 +187,95 @@ const Model = types
     };
 
     return {
-    unselectAll() {
-      // Required by ControlBase; FileUpload has no drawable region to deselect.
-    },
+      unselectAll() {
+        // Required by ControlBase; FileUpload has no drawable region to deselect.
+      },
 
-    needsUpdate() {
-      self.updateFromResult(self.result?.mainValue);
-    },
+      needsUpdate() {
+        self.updateFromResult(self.result?.mainValue);
+      },
 
-    updateFromResult(value) {
-      self.files = [];
-      if (!value) return;
+      updateFromResult(value) {
+        self.files = [];
+        if (!value) return;
 
-      const entries = Array.isArray(value) ? value : [value];
+        const entries = Array.isArray(value) ? value : [value];
 
-      entries.forEach((v) => {
-        self.files.push(
-          FileEntryModel.create({
-            id: guidGenerator(),
-            name: v.original_name || "",
-            size: 0,
-            status: "uploaded",
-            progress: 100,
-            fileId: v.file_id == null ? null : String(v.file_id),
-          }),
-        );
-      });
-    },
-
-    requiredModal() {
-      InfoModal.warning(self.requiredmessage || `Attachment for "${self.name}" is required.`);
-    },
-
-    validate() {
-      // Block annotation submission while any file is still in flight so
-      // in-progress uploads don't get silently dropped from the result.
-      const inFlight = self.files.some((f) => f.status === "pending" || f.status === "uploading");
-
-      if (inFlight) {
-        InfoModal.warning("Please wait for all file uploads to complete before submitting.");
-        return false;
-      }
-      // Delegate required / per-region checks to the captured mixin chain.
-      return Super.validate();
-    },
-
-    // Best-effort: tells the backend to release the in-progress multipart
-    // upload and delete the placeholder File row. Failures are swallowed —
-    // this is cleanup, not the primary flow, and must never block the UI.
-    abortRemote: flow(function* abortRemote(cfg, fileId, uploadId) {
-      if (!fileId || !uploadId) return;
-      try {
-        yield fetch(`${attachmentsBase(cfg)}/abort/`, {
-          method: "POST",
-          headers: forteAuthHeaders(cfg),
-          body: JSON.stringify({ id: fileId, uploadId }),
+        entries.forEach((v) => {
+          self.files.push(
+            FileEntryModel.create({
+              id: guidGenerator(),
+              name: v.original_name || "",
+              size: 0,
+              status: "uploaded",
+              progress: 100,
+              fileId: v.file_id == null ? null : String(v.file_id),
+            }),
+          );
         });
-      } catch (e) {
-        // ignore - best effort cleanup
-      }
-    }),
+      },
 
-    // Best-effort: deletes an already-confirmed upload's File row (and its S3
-    // object, per the backend's delete-upload contract). Needed because abort
-    // only cancels in-progress multipart uploads — without this, removing a
-    // completed upload orphans its S3 object forever.
-    deleteRemote: flow(function* deleteRemote(cfg, fileId) {
-      if (!fileId) return;
-      try {
-        yield fetch(`${attachmentsBase(cfg)}/delete-upload/`, {
-          method: "DELETE",
-          headers: forteAuthHeaders(cfg),
-          body: JSON.stringify({ id: fileId }),
-        });
-      } catch (e) {
-        // ignore - best effort cleanup
-      }
-    }),
+      requiredModal() {
+        InfoModal.warning(self.requiredmessage || `Attachment for "${self.name}" is required.`);
+      },
 
-    removeFile(id) {
-      const entry = self.files.find((f) => f.id === id);
+      validate() {
+        // Block annotation submission while any file is still in flight so
+        // in-progress uploads don't get silently dropped from the result.
+        const inFlight = self.files.some((f) => f.status === "pending" || f.status === "uploading");
 
-      if (!entry) return;
-
-      if (entry.status === "uploading" && entry.fileId && entry.uploadId) {
-        const controller = self._controllers.get(id);
-
-        controller?.abort();
-        self._controllers.delete(id);
-
-        try {
-          const cfg = getForteRuntime();
-
-          entry.markAborted();
-          self.abortRemote(cfg, entry.fileId, entry.uploadId);
-        } catch (e) {
-          // no runtime config available; nothing to abort remotely
+        if (inFlight) {
+          InfoModal.warning("Please wait for all file uploads to complete before submitting.");
+          return false;
         }
-      } else if (entry.status === "uploaded" && entry.fileId) {
+        // Delegate required / per-region checks to the captured mixin chain.
+        return Super.validate();
+      },
+
+      // Best-effort: tells the backend to release the in-progress multipart
+      // upload and delete the placeholder File row. Failures are swallowed —
+      // this is cleanup, not the primary flow, and must never block the UI.
+      abortRemote: flow(function* abortRemote(cfg, fileId, uploadId) {
+        if (!fileId || !uploadId) return;
         try {
-          const cfg = getForteRuntime();
-
-          self.deleteRemote(cfg, entry.fileId);
+          yield fetch(`${attachmentsBase(cfg)}/abort/`, {
+            method: "POST",
+            headers: forteAuthHeaders(cfg),
+            body: JSON.stringify({ id: fileId, uploadId }),
+          });
         } catch (e) {
-          // no runtime config available; nothing to delete remotely
+          // ignore - best effort cleanup
         }
-      }
+      }),
 
-      self.files = self.files.filter((f) => f.id !== id);
-      self.updateResult();
-    },
+      // Best-effort: deletes an already-confirmed upload's File row (and its S3
+      // object, per the backend's delete-upload contract). Needed because abort
+      // only cancels in-progress multipart uploads — without this, removing a
+      // completed upload orphans its S3 object forever.
+      deleteRemote: flow(function* deleteRemote(cfg, fileId) {
+        if (!fileId) return;
+        try {
+          yield fetch(`${attachmentsBase(cfg)}/delete-upload/`, {
+            method: "DELETE",
+            headers: forteAuthHeaders(cfg),
+            body: JSON.stringify({ id: fileId }),
+          });
+        } catch (e) {
+          // ignore - best effort cleanup
+        }
+      }),
 
-    // Cancels every upload still in flight (in-flight fetches + backend
-    // multipart upload) without waiting for completion. Intended for the
-    // component's unmount cleanup so a torn-down annotation doesn't leave
-    // stray in-flight requests or orphaned S3 multipart uploads.
-    abortAllPending() {
-      self.files.forEach((entry) => {
-        if (entry.status !== "uploading" && entry.status !== "pending") return;
+      removeFile(id) {
+        const entry = self.files.find((f) => f.id === id);
 
-        const controller = self._controllers.get(entry.id);
+        if (!entry) return;
 
-        controller?.abort();
-        self._controllers.delete(entry.id);
+        if (entry.status === "uploading" && entry.fileId && entry.uploadId) {
+          const controller = self._controllers.get(id);
 
-        if (entry.fileId && entry.uploadId) {
+          controller?.abort();
+          self._controllers.delete(id);
+
           try {
             const cfg = getForteRuntime();
 
@@ -320,180 +284,215 @@ const Model = types
           } catch (e) {
             // no runtime config available; nothing to abort remotely
           }
+        } else if (entry.status === "uploaded" && entry.fileId) {
+          try {
+            const cfg = getForteRuntime();
+
+            self.deleteRemote(cfg, entry.fileId);
+          } catch (e) {
+            // no runtime config available; nothing to delete remotely
+          }
         }
-      });
-    },
 
-    // Kicks off upload for each newly picked browser File. Returns a promise
-    // that resolves once every file has settled (uploaded or errored) so
-    // tests/callers can await the batch.
-    addFiles(fileList) {
-      const files = Array.from(fileList || []);
-      const room = self.maxFilesInt - self.activeFileCount;
-      const accepted = files.slice(0, Math.max(0, room));
-      const dropped = files.length - accepted.length;
+        self.files = self.files.filter((f) => f.id !== id);
+        self.updateResult();
+      },
 
-      if (dropped > 0) {
-        InfoModal.error(
-          `Only ${self.maxFilesInt} file${self.maxFilesInt === 1 ? "" : "s"} can be attached; ${dropped} file${dropped === 1 ? "" : "s"} ${dropped === 1 ? "was" : "were"} not added.`,
-        );
-      }
+      // Cancels every upload still in flight (in-flight fetches + backend
+      // multipart upload) without waiting for completion. Intended for the
+      // component's unmount cleanup so a torn-down annotation doesn't leave
+      // stray in-flight requests or orphaned S3 multipart uploads.
+      abortAllPending() {
+        self.files.forEach((entry) => {
+          if (entry.status !== "uploading" && entry.status !== "pending") return;
 
-      const entries = accepted.map((file) =>
-        FileEntryModel.create({
-          id: guidGenerator(),
-          name: file.name,
-          size: file.size,
-          status: "pending",
-        }),
-      );
+          const controller = self._controllers.get(entry.id);
 
-      entries.forEach((entry) => self.files.push(entry));
+          controller?.abort();
+          self._controllers.delete(entry.id);
 
-      return Promise.all(entries.map((entry, i) => self.uploadFile(entry, accepted[i])));
-    },
+          if (entry.fileId && entry.uploadId) {
+            try {
+              const cfg = getForteRuntime();
 
-    uploadFile: flow(function* uploadFile(entry, file) {
-      if (!file || file.size === 0) {
-        entry.setError("Cannot upload an empty file");
-        return;
-      }
-
-      let cfg;
-
-      try {
-        cfg = getForteRuntime();
-      } catch (e) {
-        entry.setError(e.message);
-        return;
-      }
-
-      entry.setUploading();
-
-      const controller = new AbortController();
-
-      self._controllers.set(entry.id, controller);
-
-      const count = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
-      let initiateData;
-
-      try {
-        const initRes = yield fetch(`${attachmentsBase(cfg)}/initiate-upload/`, {
-          method: "POST",
-          headers: forteAuthHeaders(cfg),
-          body: JSON.stringify({
-            name: file.name,
-            type: self.filetype,
-            mimeType: file.type || "application/octet-stream",
-            count,
-          }),
-          signal: controller.signal,
+              entry.markAborted();
+              self.abortRemote(cfg, entry.fileId, entry.uploadId);
+            } catch (e) {
+              // no runtime config available; nothing to abort remotely
+            }
+          }
         });
+      },
 
-        if (!initRes.ok) {
-          throw new Error(`Could not start upload (HTTP ${initRes.status})`);
+      // Kicks off upload for each newly picked browser File. Returns a promise
+      // that resolves once every file has settled (uploaded or errored) so
+      // tests/callers can await the batch.
+      addFiles(fileList) {
+        const files = Array.from(fileList || []);
+        const room = self.maxFilesInt - self.activeFileCount;
+        const accepted = files.slice(0, Math.max(0, room));
+        const dropped = files.length - accepted.length;
+
+        if (dropped > 0) {
+          InfoModal.error(
+            `Only ${self.maxFilesInt} file${self.maxFilesInt === 1 ? "" : "s"} can be attached; ${dropped} file${dropped === 1 ? "" : "s"} ${dropped === 1 ? "was" : "were"} not added.`,
+          );
         }
-        initiateData = yield initRes.json();
-      } catch (e) {
-        // Guard: entry may have been destroyed by removeFile while we awaited.
-        if (isAlive(entry)) entry.setError(e.message);
-        self._controllers.delete(entry.id);
-        return;
-      }
 
-      // Guard before touching the node after the first yield.
-      if (!isAlive(entry)) {
-        self._controllers.delete(entry.id);
-        return;
-      }
+        const entries = accepted.map((file) =>
+          FileEntryModel.create({
+            id: guidGenerator(),
+            name: file.name,
+            size: file.size,
+            status: "pending",
+          }),
+        );
 
-      const { id: fileId, uploadId, presignedUrls } = initiateData;
+        entries.forEach((entry) => self.files.push(entry));
 
-      entry.setRemoteIds(fileId, uploadId);
+        return Promise.all(entries.map((entry, i) => self.uploadFile(entry, accepted[i])));
+      },
 
-      const parts = [];
-      let failure = null;
+      uploadFile: flow(function* uploadFile(entry, file) {
+        if (!file || file.size === 0) {
+          entry.setError("Cannot upload an empty file");
+          return;
+        }
 
-      for (let i = 0; i < presignedUrls.length; i++) {
-        if (failure) break;
-
-        const start = i * CHUNK_SIZE;
-        const chunk = file.slice(start, start + CHUNK_SIZE);
+        let cfg;
 
         try {
-          const putRes = yield fetch(presignedUrls[i], {
-            method: "PUT",
-            body: chunk,
+          cfg = getForteRuntime();
+        } catch (e) {
+          entry.setError(e.message);
+          return;
+        }
+
+        entry.setUploading();
+
+        const controller = new AbortController();
+
+        self._controllers.set(entry.id, controller);
+
+        const count = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+        let initiateData;
+
+        try {
+          const initRes = yield fetch(`${attachmentsBase(cfg)}/initiate-upload/`, {
+            method: "POST",
+            headers: forteAuthHeaders(cfg),
+            body: JSON.stringify({
+              name: file.name,
+              type: self.filetype,
+              mimeType: file.type || "application/octet-stream",
+              count,
+            }),
             signal: controller.signal,
           });
 
-          if (!putRes.ok) {
-            throw new Error(`Part ${i + 1} failed to upload (HTTP ${putRes.status})`);
+          if (!initRes.ok) {
+            throw new Error(`Could not start upload (HTTP ${initRes.status})`);
           }
-
-          const eTag = putRes.headers?.get?.("ETag") || putRes.headers?.get?.("etag");
-
-          if (!eTag) {
-            throw new Error(`Part ${i + 1} upload did not return an ETag`);
-          }
-
-          parts.push(confirmPart(eTag, i + 1));
-          // Guard: node may be destroyed between part uploads.
-          if (isAlive(entry)) entry.setProgress(Math.round(((i + 1) / presignedUrls.length) * 100));
+          initiateData = yield initRes.json();
         } catch (e) {
-          failure = e;
-        }
-      }
-
-      // Only confirm when every single part succeeded; a partial part set
-      // would silently drop bytes from the object with no way to detect it
-      // later, so any failure here always aborts instead of confirming.
-      if (failure || parts.length !== presignedUrls.length) {
-        if (isAlive(entry)) entry.setError(failure?.message || "Upload failed");
-        // A concurrent removeFile/abortAllPending may have already fired
-        // the backend abort for this entry (e.g. this failure is the
-        // rejected fetch from that same controller.abort() call) — don't
-        // send a second best-effort abort/ request for the same upload.
-        // Guard: only abort if the entry is still alive AND not already marked
-        // aborted. When isAlive is false the entry was destroyed by removeFile,
-        // which already triggered the backend abort before destroying.
-        if (isAlive(entry) && !entry.aborted) {
-          self.abortRemote(cfg, fileId, uploadId);
-        }
-        self._controllers.delete(entry.id);
-        return;
-      }
-
-      try {
-        const confirmRes = yield fetch(`${attachmentsBase(cfg)}/confirm-upload/`, {
-          method: "POST",
-          headers: forteAuthHeaders(cfg),
-          body: JSON.stringify({ id: fileId, uploadId, parts }),
-          signal: controller.signal,
-        });
-
-        if (!confirmRes.ok) {
-          throw new Error(`Could not confirm upload (HTTP ${confirmRes.status})`);
+          // Guard: entry may have been destroyed by removeFile while we awaited.
+          if (isAlive(entry)) entry.setError(e.message);
+          self._controllers.delete(entry.id);
+          return;
         }
 
-        const confirmData = yield confirmRes.json();
+        // Guard before touching the node after the first yield.
+        if (!isAlive(entry)) {
+          self._controllers.delete(entry.id);
+          return;
+        }
 
-        if (isAlive(entry)) {
-          entry.setUploaded(confirmData.id || fileId);
-          self.updateResult();
+        const { id: fileId, uploadId, presignedUrls } = initiateData;
+
+        entry.setRemoteIds(fileId, uploadId);
+
+        const parts = [];
+        let failure = null;
+
+        for (let i = 0; i < presignedUrls.length; i++) {
+          if (failure) break;
+
+          const start = i * CHUNK_SIZE;
+          const chunk = file.slice(start, start + CHUNK_SIZE);
+
+          try {
+            const putRes = yield fetch(presignedUrls[i], {
+              method: "PUT",
+              body: chunk,
+              signal: controller.signal,
+            });
+
+            if (!putRes.ok) {
+              throw new Error(`Part ${i + 1} failed to upload (HTTP ${putRes.status})`);
+            }
+
+            const eTag = putRes.headers?.get?.("ETag") || putRes.headers?.get?.("etag");
+
+            if (!eTag) {
+              throw new Error(`Part ${i + 1} upload did not return an ETag`);
+            }
+
+            parts.push(confirmPart(eTag, i + 1));
+            // Guard: node may be destroyed between part uploads.
+            if (isAlive(entry)) entry.setProgress(Math.round(((i + 1) / presignedUrls.length) * 100));
+          } catch (e) {
+            failure = e;
+          }
         }
-      } catch (e) {
-        if (isAlive(entry)) entry.setError(e.message);
-        if (isAlive(entry) && !entry.aborted) {
-          self.abortRemote(cfg, fileId, uploadId);
+
+        // Only confirm when every single part succeeded; a partial part set
+        // would silently drop bytes from the object with no way to detect it
+        // later, so any failure here always aborts instead of confirming.
+        if (failure || parts.length !== presignedUrls.length) {
+          if (isAlive(entry)) entry.setError(failure?.message || "Upload failed");
+          // A concurrent removeFile/abortAllPending may have already fired
+          // the backend abort for this entry (e.g. this failure is the
+          // rejected fetch from that same controller.abort() call) — don't
+          // send a second best-effort abort/ request for the same upload.
+          // Guard: only abort if the entry is still alive AND not already marked
+          // aborted. When isAlive is false the entry was destroyed by removeFile,
+          // which already triggered the backend abort before destroying.
+          if (isAlive(entry) && !entry.aborted) {
+            self.abortRemote(cfg, fileId, uploadId);
+          }
+          self._controllers.delete(entry.id);
+          return;
         }
-      } finally {
-        self._controllers.delete(entry.id);
-      }
-    }),
+
+        try {
+          const confirmRes = yield fetch(`${attachmentsBase(cfg)}/confirm-upload/`, {
+            method: "POST",
+            headers: forteAuthHeaders(cfg),
+            body: JSON.stringify({ id: fileId, uploadId, parts }),
+            signal: controller.signal,
+          });
+
+          if (!confirmRes.ok) {
+            throw new Error(`Could not confirm upload (HTTP ${confirmRes.status})`);
+          }
+
+          const confirmData = yield confirmRes.json();
+
+          if (isAlive(entry)) {
+            entry.setUploaded(confirmData.id || fileId);
+            self.updateResult();
+          }
+        } catch (e) {
+          if (isAlive(entry)) entry.setError(e.message);
+          if (isAlive(entry) && !entry.aborted) {
+            self.abortRemote(cfg, fileId, uploadId);
+          }
+        } finally {
+          self._controllers.delete(entry.id);
+        }
+      }),
     };
   });
-
 
 const FileUploadModel = types.compose(
   "FileUploadModel",
@@ -568,11 +567,7 @@ const HtxFileUpload = observer(({ item }) => {
           rowKey={(entry) => entry.id}
           dataSource={item.files.slice()}
           renderItem={(entry) => (
-            <FileUploadListItem
-              entry={entry}
-              isReadOnly={isReadOnly}
-              onRemove={(id) => item.removeFile(id)}
-            />
+            <FileUploadListItem entry={entry} isReadOnly={isReadOnly} onRemove={(id) => item.removeFile(id)} />
           )}
         />
       )}

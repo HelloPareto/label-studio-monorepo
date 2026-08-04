@@ -63,9 +63,7 @@ describe("renderLatexMarkdown", () => {
   });
 
   it("sanitizes script/event-handler injection while keeping math and markdown", () => {
-    const html = renderLatexMarkdown(
-      '<script>alert(1)</script><img src=x onerror=alert(1)>\n\nMath $x$ and **bold**',
-    );
+    const html = renderLatexMarkdown("<script>alert(1)</script><img src=x onerror=alert(1)>\n\nMath $x$ and **bold**");
 
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("onerror");

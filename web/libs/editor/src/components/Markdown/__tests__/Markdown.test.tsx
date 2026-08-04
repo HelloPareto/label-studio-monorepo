@@ -23,10 +23,7 @@ describe("Markdown", () => {
 
   it("allowHtml=true keeps benign HTML but strips script/onerror", () => {
     const { container } = render(
-      <Markdown
-        text={'<div class="benign">hi</div><script>alert(1)</script><img src=x onerror=alert(1)>'}
-        allowHtml
-      />,
+      <Markdown text={'<div class="benign">hi</div><script>alert(1)</script><img src=x onerror=alert(1)>'} allowHtml />,
     );
 
     expect(container.innerHTML).toContain('<div class="benign">hi</div>');
@@ -46,4 +43,3 @@ describe("Markdown", () => {
     expect(container.innerHTML).toContain("<strong>bold</strong>");
   });
 });
-

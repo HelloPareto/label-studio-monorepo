@@ -48,10 +48,7 @@ export const ResultItem: FC<{ result: any }> = observer(({ result }) => {
       );
     }
     if (type === "textarea" || type === "llmtextarea") {
-      const displayValue =
-        type === "llmtextarea"
-          ? [mainValue?.user_input ?? ""]
-          : mainValue;
+      const displayValue = type === "llmtextarea" ? [mainValue?.user_input ?? ""] : mainValue;
 
       return (
         <Elem name="result">

@@ -10,6 +10,4 @@ export const VERSION: string = pkg.version;
 // web/webpack.config.js). Falls back to null outside of a webpack build
 // (e.g. under Jest) where the define isn't present.
 export const BUILD_DATE: string | null =
-  typeof process !== "undefined" && process.env && process.env.EDITOR_BUILD_DATE
-    ? process.env.EDITOR_BUILD_DATE
-    : null;
+  typeof process !== "undefined" && process.env && process.env.EDITOR_BUILD_DATE ? process.env.EDITOR_BUILD_DATE : null;
