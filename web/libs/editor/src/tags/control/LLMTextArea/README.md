@@ -23,8 +23,6 @@ Authorization: Token <token>
 
 The Knox token comes from the session cookie the same way all other Forte API calls work (`getCookie('Authorization')`). The tag forwards it as an `Authorization` header because that is what production `backend-ai` requires — session/cookie auth is not available on `ActiveAssignmentViewSet` in production.
 
-**Note:** Label Studio ships a local echo endpoint at `/api/llm/echo/` (in `llm_adapter/`). That is only for LS-internal development and testing; it is **not** what this tag calls in Forte embeds.
-
 ## Basic usage
 
 ```xml
