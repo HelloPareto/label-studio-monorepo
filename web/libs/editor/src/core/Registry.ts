@@ -1,3 +1,25 @@
+import type React from "react";
+// Not currently used — see the note on `addCustomTag` below.
+interface CustomTag<ViewTag = unknown> {
+  tag: string;
+  isObject?: boolean;
+  model: { name: string };
+  description?: string;
+  view: React.ComponentType<ViewTag>;
+  detector?: (value: object) => boolean;
+  resultName?: string;
+  result?: any;
+  region?: {
+    name: string;
+    nodeView: {
+      name: string;
+      icon: any;
+      getContent?: (node: any) => JSX.Element | null;
+      fullContent?: (node: any) => JSX.Element | null;
+    };
+  };
+}
+
 /**
  * Class for register View
  */
@@ -7,6 +29,7 @@ class _Registry {
   views: Record<string, any> = {};
   regions: any[] = [];
   objects: any[] = [];
+  customTags: Array<CustomTag<any>> = [];
   // list of available areas per object type
   areas = new Map();
 
@@ -42,6 +65,24 @@ class _Registry {
 
   objectTypes() {
     return this.objects;
+  }
+
+  /**
+   * Sorted list of registered tag names, for runtime introspection
+   * (e.g. verifying a bundle actually contains the tags you expect).
+   * @return {string[]}
+   */
+  registeredTags() {
+    return [...new Set(this.tags)].map(String).sort();
+  }
+
+  /**
+   * Sorted list of registered object type model names (cheap, derived
+   * from the same registration data as registeredTags()).
+   * @return {string[]}
+   */
+  registeredObjectTypes() {
+    return [...new Set(this.objects.map((o: { name: string | number }) => String(o.name)))].sort();
   }
 
   modelsArr() {
@@ -110,6 +151,21 @@ class _Registry {
 
   getPerRegionView(tag: string | number, mode: string | number) {
     return this.perRegionViews[tag]?.[mode];
+  }
+
+  // Ported from upstream's custom-tags feature (HumanSignal/label-studio
+  // PR #8108) so a host app could register a tag without forking `tags/`.
+  // Not currently used: `Registry` isn't publicly exported, and none of our
+  // own tags call this — they all self-register via plain `addTag()`.
+  addCustomTag<ViewTag = unknown>(tag: string, definition: CustomTag<ViewTag>) {
+    this.addTag(tag.toLowerCase(), definition.model, definition.view);
+    if (definition.isObject) {
+      this.addObjectType(definition.model);
+    }
+    if (definition.region) {
+      this.addRegionType(definition.region, definition.model.name, definition.detector);
+    }
+    this.customTags.push(definition);
   }
 }
 

@@ -1,0 +1,551 @@
+/* global describe, it, expect, beforeEach, afterEach, jest */
+import { unprotect } from "mobx-state-tree";
+import { FileUploadModel } from "../FileUpload";
+import InfoModal from "../../../../components/Infomodal/Infomodal";
+
+jest.mock("../../../../components/Infomodal/Infomodal", () => ({
+  __esModule: true,
+  default: {
+    warning: jest.fn(),
+    error: jest.fn(),
+  },
+}));
+
+jest.mock("../../../../core/Registry", () => ({
+  __esModule: true,
+  default: {
+    addTag: jest.fn(),
+  },
+}));
+
+function makeFile(name, size, type = "application/pdf") {
+  const file = new File([new Uint8Array(size)], name, { type });
+
+  return file;
+}
+
+function mockResponse({ ok = true, status = 200, json = {}, headers = {} } = {}) {
+  return {
+    ok,
+    status,
+    json: async () => json,
+    headers: {
+      get: (key) => headers[key] ?? headers[key.toLowerCase()] ?? headers[key.toUpperCase()] ?? null,
+    },
+  };
+}
+
+describe("FileUpload Model", () => {
+  let model;
+
+  beforeEach(() => {
+    model = FileUploadModel.create({
+      name: "attachment",
+      toname: "text",
+      maxfiles: "2",
+    });
+
+    unprotect(model);
+    model.updateResult = jest.fn();
+    model.isReadOnly = () => false;
+
+    global.window.ForteRuntime = {
+      baseUrl: "http://backend.test",
+      token: "test-token",
+      assignmentId: "42",
+    };
+
+    InfoModal.warning.mockClear();
+    InfoModal.error.mockClear();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete global.window.ForteRuntime;
+  });
+
+  describe("Initial state", () => {
+    it("has correct defaults", () => {
+      expect(model.type).toBe("fileupload");
+      expect(model.files.length).toBe(0);
+      expect(model.holdsState).toBe(false);
+      expect(model.maxFilesInt).toBe(2);
+      expect(model.canAddMore).toBe(true);
+      expect(model.selectedValues()).toBe(null);
+    });
+  });
+
+  describe("Runtime config guard", () => {
+    it("errors out without window.ForteRuntime and does not call fetch", async () => {
+      delete global.window.ForteRuntime;
+      global.fetch = jest.fn();
+
+      const file = makeFile("a.pdf", 10);
+
+      await model.addFiles([file]);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(model.files[0].status).toBe("error");
+      expect(model.files[0].error).toMatch(/ForteRuntime/);
+    });
+  });
+
+  describe("Empty file guard", () => {
+    it("does not call fetch for a zero-byte file", async () => {
+      global.fetch = jest.fn();
+
+      const file = makeFile("empty.pdf", 0);
+
+      await model.addFiles([file]);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(model.files[0].status).toBe("error");
+      expect(model.files[0].error).toMatch(/empty/i);
+    });
+  });
+
+  describe("Happy path: initiate -> PUT parts -> confirm", () => {
+    it("uploads a single-part file and stores only file_id/original_name", async () => {
+      global.fetch = jest
+        .fn()
+        // initiate
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: {
+              id: "generated-abc123",
+              uploadId: "upload-xyz",
+              presignedUrls: ["https://s3.test/part1"],
+            },
+          }),
+        )
+        // PUT part 1
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"etag-1"' } }))
+        // confirm
+        .mockResolvedValueOnce(
+          mockResponse({ json: { id: "generated-abc123", fileUrl: "https://s3.test/signed-get" } }),
+        );
+
+      const file = makeFile("report.pdf", 10, "application/pdf");
+
+      await model.addFiles([file]);
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+
+      const [initUrl, initOpts] = global.fetch.mock.calls[0];
+
+      expect(initUrl).toBe("http://backend.test/api/v1/active-assignments/42/attachments/initiate-upload/");
+      expect(initOpts.headers.Authorization).toBe("Token test-token");
+      const initBody = JSON.parse(initOpts.body);
+
+      expect(initBody).toEqual({
+        name: "report.pdf",
+        type: "Generic",
+        mimeType: "application/pdf",
+        count: 1,
+      });
+
+      const [putUrl, putOpts] = global.fetch.mock.calls[1];
+
+      expect(putUrl).toBe("https://s3.test/part1");
+      expect(putOpts.method).toBe("PUT");
+
+      const [confirmUrl, confirmOpts] = global.fetch.mock.calls[2];
+
+      expect(confirmUrl).toBe("http://backend.test/api/v1/active-assignments/42/attachments/confirm-upload/");
+      const confirmBody = JSON.parse(confirmOpts.body);
+
+      expect(confirmBody).toEqual({
+        id: "generated-abc123",
+        uploadId: "upload-xyz",
+        parts: [
+          {
+            status: "fulfilled",
+            value: { value: { ETag: '"etag-1"' }, PartNo: 1 },
+          },
+        ],
+      });
+
+      expect(model.files[0].status).toBe("uploaded");
+      expect(model.updateResult).toHaveBeenCalled();
+
+      const values = model.selectedValues();
+
+      expect(values).toEqual([{ file_id: "generated-abc123", original_name: "report.pdf" }]);
+
+      // never store presigned/signed URLs in the result payload
+      const serialized = JSON.stringify(values);
+
+      expect(serialized).not.toMatch(/s3\.test/);
+      expect(serialized).not.toMatch(/fileUrl|file_url/i);
+    });
+
+    it("uploads multi-part files with correct chunk math and part numbering", async () => {
+      const size = 8 * 1024 * 1024 + 10; // just over one 8MB chunk -> 2 parts
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: {
+              id: "generated-multi",
+              uploadId: "upload-multi",
+              presignedUrls: ["https://s3.test/p1", "https://s3.test/p2"],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"etag-1"' } }))
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"etag-2"' } }))
+        .mockResolvedValueOnce(mockResponse({ json: { id: "generated-multi" } }));
+
+      const file = makeFile("video.mp4", size, "video/mp4");
+
+      await model.addFiles([file]);
+
+      const initBody = JSON.parse(global.fetch.mock.calls[0][1].body);
+
+      expect(initBody.count).toBe(2);
+
+      const confirmBody = JSON.parse(global.fetch.mock.calls[3][1].body);
+
+      expect(confirmBody.parts).toEqual([
+        { status: "fulfilled", value: { value: { ETag: '"etag-1"' }, PartNo: 1 } },
+        { status: "fulfilled", value: { value: { ETag: '"etag-2"' }, PartNo: 2 } },
+      ]);
+      expect(model.files[0].status).toBe("uploaded");
+    });
+  });
+
+  describe("Partial failure aborts and never confirms", () => {
+    it("calls abort and leaves the entry errored when a part PUT fails", async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: {
+              id: "generated-fail",
+              uploadId: "upload-fail",
+              presignedUrls: ["https://s3.test/p1", "https://s3.test/p2"],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"etag-1"' } }))
+        .mockResolvedValueOnce(mockResponse({ ok: false, status: 500 }))
+        // abort call
+        .mockResolvedValueOnce(mockResponse({ json: { id: "generated-fail", uploadId: "upload-fail" } }));
+
+      const file = makeFile("big.bin", 8 * 1024 * 1024 + 5);
+
+      await model.addFiles([file]);
+
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+
+      const confirmCalls = global.fetch.mock.calls.filter(([url]) => url.includes("confirm-upload"));
+
+      expect(confirmCalls.length).toBe(0);
+
+      const [abortUrl, abortOpts] = global.fetch.mock.calls[3];
+
+      expect(abortUrl).toBe("http://backend.test/api/v1/active-assignments/42/attachments/abort/");
+      expect(JSON.parse(abortOpts.body)).toEqual({ id: "generated-fail", uploadId: "upload-fail" });
+
+      expect(model.files[0].status).toBe("error");
+      expect(model.updateResult).not.toHaveBeenCalled();
+      expect(model.selectedValues()).toBe(null);
+    });
+
+    it("aborts and does not confirm when the initiate call itself fails", async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce(mockResponse({ ok: false, status: 400 }));
+
+      const file = makeFile("bad.pdf", 10);
+
+      await model.addFiles([file]);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(model.files[0].status).toBe("error");
+    });
+
+    it("swallows abort-endpoint network errors without throwing", async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: { id: "generated-x", uploadId: "upload-x", presignedUrls: ["https://s3.test/p1"] },
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse({ ok: false, status: 500 }))
+        .mockRejectedValueOnce(new Error("network down"));
+
+      const file = makeFile("x.pdf", 10);
+
+      await expect(model.addFiles([file])).resolves.toBeDefined();
+      expect(model.files[0].status).toBe("error");
+    });
+  });
+
+  describe("maxFiles", () => {
+    it("does not accept more files than maxFiles allows", async () => {
+      // Successful uploads (ETag present) so the two accepted entries genuinely
+      // occupy both slots — this test is about the room/truncation logic in
+      // addFiles, not about error entries (which no longer count toward the cap).
+      global.fetch = jest.fn().mockImplementation((url) => {
+        if (typeof url === "string" && url.includes("initiate-upload")) {
+          return Promise.resolve(
+            mockResponse({ json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] } }),
+          );
+        }
+        if (typeof url === "string" && url.includes("confirm-upload")) {
+          return Promise.resolve(mockResponse({ json: { id: "id" } }));
+        }
+        // presigned PUT
+        return Promise.resolve(mockResponse({ headers: { ETag: '"etag"' } }));
+      });
+
+      await model.addFiles([makeFile("a.pdf", 10), makeFile("b.pdf", 10), makeFile("c.pdf", 10)]);
+
+      expect(model.files.length).toBe(2);
+      expect(model.files.every((f) => f.status === "uploaded")).toBe(true);
+      expect(model.canAddMore).toBe(false);
+
+      // dropped file(s) must surface user-visible feedback, not silent truncation
+      expect(InfoModal.error).toHaveBeenCalledTimes(1);
+      expect(InfoModal.error.mock.calls[0][0]).toMatch(/1 file/i);
+    });
+
+    it("does not surface feedback when every file fits under the cap", async () => {
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      expect(model.files.length).toBe(1);
+      expect(InfoModal.error).not.toHaveBeenCalled();
+    });
+
+    it("does not let errored attempts permanently consume upload slots", async () => {
+      // maxfiles is "2" for this model (see beforeEach). Two failed attempts
+      // (zero-byte files error out synchronously, no fetch involved) must not
+      // block a real, successful upload afterwards.
+      await model.addFiles([makeFile("bad1.pdf", 0), makeFile("bad2.pdf", 0)]);
+
+      expect(model.files.length).toBe(2);
+      expect(model.files.every((f) => f.status === "error")).toBe(true);
+      // Both slots look "full" by count, but neither actually holds a file.
+      expect(model.canAddMore).toBe(true);
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({ json: { id: "ok-id", uploadId: "ok-upload", presignedUrls: ["https://s3.test/p1"] } }),
+        )
+        .mockResolvedValueOnce(mockResponse({ headers: { ETag: '"e1"' } }))
+        .mockResolvedValueOnce(mockResponse({ json: { id: "ok-id" } }));
+
+      await model.addFiles([makeFile("good.pdf", 10)]);
+
+      const uploaded = model.files.filter((f) => f.status === "uploaded");
+
+      expect(uploaded.length).toBe(1);
+      expect(model.selectedValues()).toEqual([{ file_id: "ok-id", original_name: "good.pdf" }]);
+    });
+  });
+
+  describe("updateFromResult / round-trip", () => {
+    it("restores uploaded entries from a saved result without re-uploading", () => {
+      model.updateFromResult([{ file_id: "abc", original_name: "doc.pdf" }]);
+
+      expect(model.files.length).toBe(1);
+      expect(model.files[0].status).toBe("uploaded");
+      expect(model.files[0].fileId).toBe("abc");
+      expect(model.selectedValues()).toEqual([{ file_id: "abc", original_name: "doc.pdf" }]);
+    });
+
+    it("clears files when the result value is null", () => {
+      model.updateFromResult([{ file_id: "abc", original_name: "doc.pdf" }]);
+      model.updateFromResult(null);
+
+      expect(model.files.length).toBe(0);
+    });
+  });
+
+  describe("abortAllPending (unmount cleanup)", () => {
+    it("aborts in-flight controllers and calls the backend abort endpoint", async () => {
+      let resolvePut;
+      const putPromise = new Promise((resolve) => {
+        resolvePut = resolve;
+      });
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: { id: "generated-um", uploadId: "upload-um", presignedUrls: ["https://s3.test/p1"] },
+          }),
+        )
+        .mockImplementationOnce(() => putPromise)
+        .mockResolvedValueOnce(mockResponse({ json: {} }));
+
+      const file = makeFile("um.pdf", 10);
+      const uploadPromise = model.addFiles([file]);
+
+      // let the initiate call resolve and the PUT call start
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.files[0].status).toBe("uploading");
+
+      model.abortAllPending();
+
+      resolvePut({ ok: false, status: 0 });
+      await uploadPromise;
+
+      const abortCalls = global.fetch.mock.calls.filter(([url]) => url.includes("/abort/"));
+
+      // abortAllPending's own abort fires synchronously; uploadFile's catch
+      // must see entry.aborted and skip its own duplicate abort/ call once
+      // the (now-failed) in-flight PUT settles.
+      expect(abortCalls.length).toBe(1);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("removeFile during in-flight upload — no duplicate abort", () => {
+    it("fires exactly one backend abort when removeFile is called while uploading", async () => {
+      let resolvePut;
+      const putPromise = new Promise((resolve) => {
+        resolvePut = resolve;
+      });
+
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(
+          mockResponse({
+            json: { id: "rf-id", uploadId: "rf-upload", presignedUrls: ["https://s3.test/p1"] },
+          }),
+        )
+        .mockImplementationOnce(() => putPromise)
+        // One abort call allowed — a second would be a duplicate bug.
+        .mockResolvedValueOnce(mockResponse({ json: {} }));
+
+      const file = makeFile("rm.pdf", 10);
+      const uploadPromise = model.addFiles([file]);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.files[0].status).toBe("uploading");
+
+      // removeFile marks the entry aborted and destroys it.
+      model.removeFile(model.files[0].id);
+
+      // Let the stalled PUT settle — the entry is now dead.
+      resolvePut({ ok: false, status: 0 });
+      await uploadPromise;
+
+      const abortCalls = global.fetch.mock.calls.filter(([url]) => url.includes("/abort/"));
+
+      // removeFile triggered the one abort; uploadFile's catch must NOT fire
+      // a second one since isAlive(entry) is false after the node is destroyed.
+      expect(abortCalls.length).toBe(1);
+    });
+  });
+
+  describe("removeFile", () => {
+    it("removes an uploaded entry, deletes it on the backend, and updates the result", async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce(mockResponse({ json: { id: "abc" } }));
+
+      model.updateFromResult([{ file_id: "abc", original_name: "doc.pdf" }]);
+      const id = model.files[0].id;
+
+      model.removeFile(id);
+      await Promise.resolve();
+
+      expect(model.files.length).toBe(0);
+      expect(model.updateResult).toHaveBeenCalled();
+
+      // regression test: removing an already-confirmed upload must call
+      // delete-upload, or the S3 object is orphaned forever (abort only
+      // cancels in-progress multipart uploads, it has nothing to cancel here)
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const [url, opts] = global.fetch.mock.calls[0];
+
+      expect(url).toBe("http://backend.test/api/v1/active-assignments/42/attachments/delete-upload/");
+      expect(opts.method).toBe("DELETE");
+      expect(JSON.parse(opts.body)).toEqual({ id: "abc" });
+    });
+  });
+
+  describe("validate() blocks submission while upload is in flight", () => {
+    it("shows a warning when a file is still uploading and the model reports in-flight state", async () => {
+      let holdFetch;
+      global.fetch = jest
+        .fn()
+        // initiate-upload succeeds
+        .mockResolvedValueOnce(
+          mockResponse({ json: { id: "x", uploadId: "u", presignedUrls: ["https://s3.test/p1"] } }),
+        )
+        // PUT part blocks until we release it
+        .mockReturnValueOnce(
+          new Promise((r) => {
+            holdFetch = r;
+          }),
+        )
+        // abort best-effort call after PUT failure
+        .mockResolvedValueOnce(mockResponse({ json: {} }));
+
+      const file = makeFile("doc.pdf", 10);
+      const uploadPromise = model.addFiles([file]);
+
+      // Allow the initiate call to resolve and the PUT to start
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(model.files[0].status).toBe("uploading");
+
+      // The files array has an in-flight entry — validate() would block here
+      const inFlight = model.files.some((f) => f.status === "pending" || f.status === "uploading");
+      expect(inFlight).toBe(true);
+
+      // Release the stalled PUT with failure so the upload settles cleanly
+      holdFetch(mockResponse({ ok: false, status: 0 }));
+      await uploadPromise;
+    });
+  });
+
+  describe("authHeaders token normalization", () => {
+    it("prepends 'Token ' when the configured token is raw", async () => {
+      global.window.ForteRuntime.token = "raw-token";
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      const [, initOpts] = global.fetch.mock.calls[0];
+
+      expect(initOpts.headers.Authorization).toBe("Token raw-token");
+    });
+
+    it("passes an already-prefixed token through verbatim", async () => {
+      global.window.ForteRuntime.token = "Token already-prefixed";
+      global.fetch = jest.fn().mockResolvedValue(
+        mockResponse({
+          json: { id: "id", uploadId: "uid", presignedUrls: ["https://s3.test/p1"] },
+        }),
+      );
+
+      await model.addFiles([makeFile("a.pdf", 10)]);
+
+      const [, initOpts] = global.fetch.mock.calls[0];
+
+      expect(initOpts.headers.Authorization).toBe("Token already-prefixed");
+    });
+  });
+});

@@ -208,6 +208,9 @@ export default types
       },
 
       get classifications() {
+        // Only <TextArea> exposes a `.regions` array of TextAreaRegion items for the
+        // outliner. <LLMTextArea> stores a single submission via ClassificationBase and
+        // must not be included here — `t.regions` is undefined and crashes RegionTree.
         const textAreas = Array.from(self.annotation.names.values())
           .filter((t) => isDefined(t))
           .filter((t) => t.type === "textarea" && !t.perregion)

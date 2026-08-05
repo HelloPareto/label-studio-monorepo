@@ -1,0 +1,6 @@
+.htx-markdown {
+  // Host app's global `p { color }` reset leaks in and washes out dark-mode text.
+  * {
+    color: inherit;
+  }
+}

@@ -1,0 +1,8 @@
+.htx-latextext {
+  // Same host-CSS leak as Markdown.scss: force inherit to fix dark-mode contrast.
+  color: inherit;
+
+  * {
+    color: inherit;
+  }
+}

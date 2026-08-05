@@ -118,6 +118,7 @@ const ResultText: FC<{ result: MSTResult }> = observer(({ result }) => {
   const { name } = control;
 
   if (type === "textarea") return [name, mainValue.join(" | ")].join(": ");
+  if (type === "llmtextarea") return [name, mainValue?.user_input ?? ""].join(": ");
   if (type === "choices") return [name, mainValue.join(", ")].join(": ");
   if (type === "taxonomy") {
     const values = mainValue.map((v: string[]) => v.join("/"));
