@@ -1,6 +1,6 @@
 {
   "name": "@pareto-engineering/label-studio-editor",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "main": "index.esm.js",
   "types": "index.d.ts",
   "type": "module",
